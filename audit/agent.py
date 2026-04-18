@@ -1,57 +1,99 @@
 # 初始化LLM
-from typing import List
+import asyncio
+import re
 
-import networkx as nx
-from openai import OpenAI,AsyncOpenAI
+from loguru import logger
+from openai import AsyncOpenAI
 
 from config import C
-from models import SourceFile, CodeUnit
-from prompt import PROMPT_AGENT_1, PROMPT_AGENT_2
-from utils import parse_code_uint, gen_graph_by_codeunits
+from models import SourceFile
+from prompt import build_agent_1_prompt, build_agent_2_prompt
+from utils import gen_line_code, parse_code_uint
 
 llm = AsyncOpenAI(
     base_url=C.openai.base_url,
-    api_key=C.openai.api_key,  # 替换为你需要的 base URL
+    api_key=C.openai.api_key,
+    timeout=C.openai.timeout_seconds,
 )
+_loop_semaphores = {}
 
-async def chat_completion_text(text:str,prompt:str):
-    messages=[]
-    messages.append({
-        "role":"system",
-        "content":prompt
-    })
-    messages.append({
-        "role":"user",
-        "content":text
-    })
-    res=await chat_completion_messages(messages)
-    return res
-async def chat_completion_messages(messages: []) -> str:
-    response = await llm.chat.completions.create(
-        model=C.openai.model,
-        messages=messages
-    )
-    if response.choices:
-        content = response.choices[0].message.content
-        return content
-    else:
-        raise Exception("No response from OpenAI")
 
-#负责解析项目依赖，生成项目依赖图谱
-async def agent_1(sourceFile:SourceFile)->List[nx.Graph]:
+def get_llm_semaphore():
+    loop = asyncio.get_running_loop()
+    semaphore = _loop_semaphores.get(loop)
+    if semaphore is None:
+        semaphore = asyncio.Semaphore(max(1, C.openai.max_concurrency))
+        _loop_semaphores[loop] = semaphore
+    return semaphore
+
+
+async def chat_completion_text(text: str, prompt: str):
+    messages = [
+        {
+            "role": "system",
+            "content": prompt,
+        },
+        {
+            "role": "user",
+            "content": text,
+        },
+    ]
+    return await chat_completion_messages(messages)
+
+
+async def chat_completion_messages(messages) -> str:
+    last_error = None
+    for attempt in range(1, C.openai.max_retries + 1):
+        try:
+            async with get_llm_semaphore():
+                response = await llm.chat.completions.create(
+                    model=C.openai.model,
+                    messages=messages,
+                )
+            if response.choices and response.choices[0].message.content:
+                return response.choices[0].message.content
+            raise RuntimeError("No response from OpenAI")
+        except Exception as exc:
+            last_error = exc
+            if attempt >= C.openai.max_retries:
+                break
+            backoff = C.openai.retry_backoff_seconds * attempt
+            logger.warning(
+                "OpenAI 请求失败，第 {}/{} 次将在 {} 秒后重试: {}",
+                attempt,
+                C.openai.max_retries,
+                backoff,
+                exc,
+            )
+            await asyncio.sleep(backoff)
+    raise RuntimeError(f"OpenAI 请求最终失败: {last_error}") from last_error
+
+
+async def agent_1(source_file: SourceFile):
     """
     使用语言模型解析代码中的依赖关系。
-
-    :param sourceFile:
-    :param code: 输入的 Python 代码字符串
-    :return: 解析后的依赖关系描述字符串
     """
-    response = await chat_completion_text(sourceFile.source_code,PROMPT_AGENT_1)
-    #解析为对象数据
-    res=parse_code_uint(code=sourceFile.source_code,path=sourceFile.path,name=sourceFile.name,input_text=response)
-    return res
+    numbered_code = gen_line_code(source_file.source_code, start_line=source_file.start_line)
+    prompt = build_agent_1_prompt(source_file.extension)
+    if source_file.extension:
+        logger.debug("Agent_1 使用语言增强规则: {}", source_file.extension.lower())
+    response = await chat_completion_text(numbered_code, prompt)
+    parsed = parse_code_uint(
+        code=source_file.source_code,
+        path=source_file.path,
+        name=source_file.name,
+        input_text=response,
+        base_line=source_file.start_line,
+    )
+    if parsed:
+        logger.debug("Agent_1 解析成功: {} -> {} 条依赖", source_file.path, len(parsed))
+    return parsed
 
-async def agent_2(text:str)->str:
-    response = await chat_completion_text(text, PROMPT_AGENT_2)
-    # 解析为对象数据
-    return response
+
+async def agent_2(text: str) -> str:
+    extensions = sorted(set(re.findall(r"\.(py|js|ts|java|go|php|c|cpp|cs)\b", text, flags=re.IGNORECASE)))
+    normalized_extensions = [f".{ext.lower()}" for ext in extensions]
+    prompt = build_agent_2_prompt(normalized_extensions)
+    if normalized_extensions:
+        logger.debug("Agent_2 使用语言增强规则: {}", ", ".join(normalized_extensions))
+    return await chat_completion_text(text, prompt)

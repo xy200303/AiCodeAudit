@@ -15,7 +15,11 @@ def create_default_config(file_path):
             'base_url': 'https://api.openai-proxy.org/v1',
             'api_key': "sk-BKR5huAmRgTd1qjwP6AWocZXvmgTjJ2UI46uiHi104YT4Jnh",
             'model': 'gpt-4o-mini',
-            'max_per_tokens': 4096
+            'max_per_tokens': 4096,
+            'timeout_seconds': 60,
+            'max_retries': 3,
+            'retry_backoff_seconds': 2,
+            'max_concurrency': 5
         },
         'project': {
             "source_file_ext": [".py", ".go", ".js", ".java", ".cpp", ".php", ".aspx", ".asp", ".c", ".cs"],
@@ -26,7 +30,9 @@ def create_default_config(file_path):
                           "specs",
                           "tmp", "temp", "cache", "logs", "docker", "containers", "k8s", "kube", ".circleci", ".github",
                           ".travis", "docs", "doc", ".secrets", ".env"],
-            "exclude_max_file_size": 1
+            "exclude_max_file_size": 1,
+            "audit_context_depth": 2,
+            "max_audit_nodes": 12
         }
     }
     with open(file_path, 'w', encoding='utf-8') as file:

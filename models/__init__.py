@@ -6,6 +6,7 @@ class SourceFile(BaseModel):
     name: str
     source_code: str
     extension: str
+    start_line: int = 1
 
 class SourceDir(BaseModel):
     path: str
@@ -19,12 +20,18 @@ class OpenAIConfig(BaseModel):
     base_url: str
     max_per_tokens: int
     model: str
+    timeout_seconds: float = 60.0
+    max_retries: int = 3
+    retry_backoff_seconds: float = 2.0
+    max_concurrency: int = 5
 
 class ProjectConfig(BaseModel):
-    config_file_ext: List[str] = []
-    exclude_dir: List[str] = []
+    config_file_ext: List[str] = Field(default_factory=list)
+    exclude_dir: List[str] = Field(default_factory=list)
     exclude_max_file_size: float
-    source_file_ext: List[str] = []
+    source_file_ext: List[str] = Field(default_factory=list)
+    audit_context_depth: int = 2
+    max_audit_nodes: int = 12
 
 class Config(BaseModel):
     openai: OpenAIConfig

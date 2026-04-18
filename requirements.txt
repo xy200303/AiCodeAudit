@@ -6,4 +6,6 @@ openai
 tiktoken
 networkx
 matplotlib
-pydantic
+tqdm
+streamlit
+pandas

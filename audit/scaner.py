@@ -1,8 +1,9 @@
 import os
+from collections import deque
 
 from config import C
-from models import SourceDir, SourceFile, Config
-from utils import gen_line_code
+from models import SourceDir, SourceFile
+from utils import get_encoding
 
 
 def scan_project_struct(project_dir):
@@ -19,29 +20,35 @@ def scan_dir(dir_path, parent_dir):
     except OSError as e:
         print(f"Failed to read directory {dir_path}: {e}")
         return
+
     for entry in entries:
         entry_path = os.path.join(dir_path, entry.name)
-
         if is_excluded_dir(entry_path):
             continue
         if entry.is_dir():
             sub_dir = SourceDir(path=entry_path, name=entry.name)
             scan_dir(entry_path, sub_dir)
             parent_dir.source_dirs.append(sub_dir)
-        else:
-            ext = os.path.splitext(entry.name)[1]
-            if is_source_file(ext) or is_config_file(ext):
-                file_info = entry.stat()
-                if file_info.st_size / (1024 * 1024) > C.project.exclude_max_file_size:
-                    continue
-                content = read_source_file(entry_path)
-                if content is not None:
-                    parent_dir.source_files.append(SourceFile(
-                        path=entry_path,
-                        name=entry.name,
-                        source_code=content,
-                        extension=ext
-                    ))
+            continue
+
+        ext = os.path.splitext(entry.name)[1]
+        if not (is_source_file(ext) or is_config_file(ext)):
+            continue
+
+        file_info = entry.stat()
+        if file_info.st_size / (1024 * 1024) > C.project.exclude_max_file_size:
+            continue
+
+        content = read_source_file(entry_path)
+        if content is None:
+            continue
+
+        parent_dir.source_files.append(SourceFile(
+            path=entry_path,
+            name=entry.name,
+            source_code=content,
+            extension=ext
+        ))
 
 
 def is_source_file(ext):
@@ -53,7 +60,8 @@ def is_config_file(ext):
 
 
 def is_excluded_dir(dir_path):
-    return any(exclude in dir_path for exclude in C.project.exclude_dir)
+    normalized_parts = set(os.path.normpath(dir_path).split(os.sep))
+    return any(exclude in normalized_parts for exclude in C.project.exclude_dir)
 
 
 def read_source_file(file_path):
@@ -64,7 +72,11 @@ def read_source_file(file_path):
         print(f"Failed to read file {file_path}: {e}")
         return None
 
-def build_tree_string(dir_obj, last=False, tree=[]):
+
+def build_tree_string(dir_obj, last=False, tree=None):
+    if tree is None:
+        tree = []
+
     indent = ""
     for i, is_last in enumerate(tree):
         if i < len(tree) - 1:
@@ -85,16 +97,17 @@ def build_tree_string(dir_obj, last=False, tree=[]):
 
     return result
 
+
 def print_source_dir(dir_obj):
     return build_tree_string(dir_obj, True, [])
 
 
 def traverse_source_dir_bfs(root):
     text = []
-    queue = [root]
+    queue = deque([root])
 
     while queue:
-        current = queue.pop(0)
+        current = queue.popleft()
         for file in current.source_files:
             file_info = f"<代码单元>\n//{file.path}\n{file.source_code}<代码单元>"
             text.append(file_info)
@@ -103,35 +116,55 @@ def traverse_source_dir_bfs(root):
     return text
 
 
-def get_all_source_files_bfs(root_dir,chunk_token_size):
+def get_all_source_files_bfs(root_dir, chunk_token_size):
     """
-    使用广度优先搜索获取SourceDir对象中的所有SourceFile。
+    使用广度优先搜索获取 SourceDir 对象中的所有 SourceFile，并按 token 分块。
+    """
+    encoding = get_encoding()
 
-    :param root_dir: SourceDir对象
-    :return: 包含所有SourceFile的列表
-    """
-    def split_large_files(files, chunk_size):
+    def split_large_files(files):
         new_files = []
         for file in files:
-            while len(file.source_code) > 0:
-                chunk = file.source_code[:chunk_size]
-                file.source_code = file.source_code[chunk_size:]
-                new_files.append(SourceFile(
+            lines = file.source_code.splitlines()
+            if not lines:
+                new_files.append(file)
+                continue
+
+            current_chunk = []
+            current_tokens = 0
+            chunk_start_line = 1
+
+            for line_number, line in enumerate(lines, start=1):
+                line_tokens = len(encoding.encode(line + "\n"))
+                if current_chunk and current_tokens + line_tokens > chunk_token_size:
+                    new_files.append(SourceFile(
                         path=file.path,
                         name=file.name,
-                        source_code=gen_line_code(chunk),
-                        extension=file.extension
+                        source_code="\n".join(current_chunk),
+                        extension=file.extension,
+                        start_line=chunk_start_line,
                     ))
+                    current_chunk = []
+                    current_tokens = 0
+                    chunk_start_line = line_number
+
+                current_chunk.append(line)
+                current_tokens += line_tokens
+
+            if current_chunk:
+                new_files.append(SourceFile(
+                    path=file.path,
+                    name=file.name,
+                    source_code="\n".join(current_chunk),
+                    extension=file.extension,
+                    start_line=chunk_start_line,
+                ))
         return new_files
 
-    queue = [root_dir]
+    queue = deque([root_dir])
     all_files = []
     while queue:
-        current_dir = queue.pop(0)
-
-        # 分割过大的文件
-        processed_files = split_large_files(current_dir.source_files, chunk_token_size)
-
-        all_files.extend(processed_files)  # 添加当前目录下的所有文件（包括拆分后的）
-        queue.extend(current_dir.source_dirs)  # 将当前目录下的所有子目录加入队列
+        current_dir = queue.popleft()
+        all_files.extend(split_large_files(current_dir.source_files))
+        queue.extend(current_dir.source_dirs)
     return all_files

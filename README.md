@@ -1,73 +1,215 @@
 # AI Code Audit
 
-基于AI的智能代码审计工具，通过深度学习和自然语言处理技术，自动化识别代码中的安全漏洞和潜在问题。
+一个基于大模型的代码安全审计工具，支持命令行和 Streamlit Web 界面两种使用方式。项目会先提取源码中的显式依赖关系，构建调用图，再结合局部子图上下文做安全审计，输出结构化审计报告和依赖图谱。
 
-## 功能特点
+## 功能概览
 
-- 智能代码分析：利用AI技术自动分析代码结构和依赖关系
-- 并发处理：支持多任务并行处理，提高审计效率
-- 可视化输出：生成直观的审计报告和依赖关系图
-- 跨语言支持：可以分析多种编程语言的源代码
+- 多语言源码扫描：支持 `.py`、`.go`、`.js`、`.java`、`.cpp`、`.php`、`.c`、`.cs` 等常见源码文件
+- AI 依赖提取：按代码切片提取显式调用关系，生成 `GraphML` 依赖图
+- AI 安全审计：基于局部调用上下文识别高置信度漏洞，降低误报
+- 结构化报告：审计结果采用稳定标签结构，便于解析、展示和后续扩展
+- Web 可视化：支持上传项目压缩包，一键分析、结果列表查看、依赖图谱展示
+- 稳定性增强：支持 OpenAI 调用超时、重试、并发信号量和失败隔离
+- 性能优化：避免全路径枚举，使用局部子图审计；BFS 改为 `deque`；减少无意义日志
 
-## 安装说明
+## 技术原理
 
-1. 克隆项目到本地：
+项目整体分为两个阶段。第一阶段会扫描项目目录，读取源码与配置文件，并按 token 对源码做切片，保留原始行号偏移，再交给 Agent_1 提取显式依赖关系，最终构建项目调用图。第二阶段会围绕图中的节点提取局部子图上下文，而不是枚举整条全路径，再交给 Agent_2 判断是否存在“外部输入 -> 危险操作 -> 缺少校验/转义/鉴权”的真实漏洞链路。最终输出 `graphml` 依赖图和结构化审计报告，供命令行或 Streamlit 页面展示。
+
+## 项目结构
+
+```text
+AiCodeAudit/
+├─ audit/                  # 扫描、依赖提取、审计调度
+├─ config/                 # 配置加载
+├─ models/                 # 数据模型
+├─ prompt/                 # Agent 提示词模板
+├─ utils/                  # 通用工具函数
+├─ app.py                  # Streamlit Web 服务入口
+├─ main.py                 # 命令行入口
+├─ config.example.yaml     # 配置示例
+├─ config.yaml             # 实际运行配置
+└─ requirements.txt
+```
+
+## 安装
+
+1. 克隆项目
+
 ```bash
 git clone https://github.com/xy200303/AiCodeAudit.git
 cd AiCodeAudit
 ```
 
-2. 安装依赖：
+2. 安装依赖
+
 ```bash
 pip install -r requirements.txt
 ```
 
-## 使用方法
+3. 准备配置文件
 
-### 命令行参数
+```bash
+copy config.example.yaml config.yaml
+```
+
+然后在 `config.yaml` 中填写你自己的 OpenAI 兼容接口配置，例如：
+
+- `openai.api_key`
+- `openai.base_url`
+- `openai.model`
+- `openai.timeout_seconds`
+- `openai.max_retries`
+- `openai.retry_backoff_seconds`
+- `openai.max_concurrency`
+
+## 命令行使用
+
+### 基本命令
 
 ```bash
 python main.py -d <target_dir> -o <output_dir> -b <batch_size>
 ```
 
-参数说明：
-- `-d`：目标项目目录路径（默认："./演示项目/openssh-9.9p1"）
-- `-o`：输出文件目录（默认："./output"）
-- `-b`：并发处理数量（默认：100）
+### 参数说明
+
+- `-d`：待审计项目目录，默认 `./演示项目/openssh-9.9p1`
+- `-o`：输出目录，默认 `./output`
+- `-b`：每批任务数，默认 `10`
 
 ### 示例
 
 ```bash
-# 使用默认参数审计示例项目
+# 使用默认示例项目
 python main.py
 
-# 指定目标目录和输出目录
+# 审计指定项目
 python main.py -d ./your-project -o ./audit-results
 
-# 调整并发数量
-python main.py -d ./your-project -b 50
+# 调整每批任务数
+python main.py -d ./your-project -b 5
 ```
+
+## Web 使用
+
+启动 Streamlit 服务：
+
+```bash
+streamlit run app.py
+```
+
+启动后可在侧边栏使用三个功能页：
+
+- `分析`：上传项目 `zip` 压缩包并执行审计
+- `结果可视化`：按结果列表查看结构化漏洞信息
+- `依赖可视化`：查看交互式依赖图、静态预览、节点列表和边列表
+
+### Web 页面说明
+
+- 支持上传 `zip` 压缩包自动解压并分析
+- 支持设置每批任务数
+- 支持保留或清理上传与解压的中间文件
+- 审计结果页默认不展开原始审计块，以减少大量结果时的卡顿
 
 ## 输出结果
 
-审计完成后，在输出目录中会生成以下文件：
-- `<project_md5>.graphml`：项目依赖关系图
-- `<project_md5>_审计结果.log`：详细的审计报告
+每次分析完成后，输出目录中通常会生成以下文件：
 
-## 配置文件
+- `<project_hash>.graphml`：项目依赖关系图
+- `<project_hash>_审计结果.log`：结构化审计报告
 
-项目配置在`config.yaml`文件中，可以根据需要调整相关参数。
+如果使用 Web 模式，结果默认输出到：
+
+```text
+output/streamlit_runs/
+```
+
+## 审计报告格式
+
+当前审计报告已改为更稳定的结构化标签格式，便于前端解析和后续扩展。典型格式如下：
+
+```text
+<审计报告>
+<文件>
+路径: /src/user/login.py
+结论: 存在风险
+<漏洞>
+类型: SQL注入
+等级: 高危
+位置: L47-L49
+<代码特征>
+cursor.execute("SELECT * FROM users WHERE name = '" + username + "'")
+</代码特征>
+<攻击向量>
+攻击者控制 username 并进入 SQL 拼接语句。
+</攻击向量>
+<潜在影响>
+可导致任意用户数据查询和认证绕过。
+</潜在影响>
+<修复建议>
+改为参数化查询，禁止字符串拼接 SQL。
+</修复建议>
+</漏洞>
+</文件>
+</审计报告>
+```
+
+未发现明确风险时，输出为：
+
+```text
+<审计报告>
+<结论>审计通过</结论>
+</审计报告>
+```
+
+## 配置说明
+
+`config.yaml` 中主要包含两类配置：
+
+### OpenAI 配置
+
+- `api_key`：接口密钥
+- `base_url`：OpenAI 或兼容接口地址
+- `max_per_tokens`：单次切片 token 上限
+- `model`：使用的模型名称
+- `timeout_seconds`：单次请求超时秒数
+- `max_retries`：失败重试次数
+- `retry_backoff_seconds`：重试退避基线秒数
+- `max_concurrency`：并发上限
+
+### 项目扫描配置
+
+- `source_file_ext`：需要扫描的源码后缀
+- `config_file_ext`：需要识别的配置文件后缀
+- `exclude_dir`：默认排除目录
+- `exclude_max_file_size`：单文件大小限制
+- `audit_context_depth`：局部审计子图深度
+- `max_audit_nodes`：单次审计最大上下文节点数
+
+## 依赖
+
+核心依赖包括：
+
+- `openai`
+- `tiktoken`
+- `networkx`
+- `streamlit`
+- `matplotlib`
+- `pandas`
+- `loguru`
+
+完整依赖请见 `requirements.txt`。
+
+## 注意事项
+
+- 请不要将真实密钥提交到仓库，建议仅在本地维护 `config.yaml`
+- 新版页面优先解析结构化报告，同时兼容旧版半结构化日志
+- 旧的审计结果文件不会自动升级格式，如需获得新结构，请重新执行一次审计
 
 ## 许可证
 
 [MIT License](LICENSE)
 
-## 贡献指南
+## 贡献
 
-欢迎提交Issue和Pull Request来帮助改进项目。
-
-## 联系方式
-
-如有问题或建议，请通过以下方式联系：
-- 提交Issue
-- 发送邮件至：your-email@example.com
+欢迎通过 Issue 和 Pull Request 提交问题、建议或改进。
