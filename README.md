@@ -1,10 +1,10 @@
 # AI Code Audit
 
 一个基于大模型的代码安全审计工具，支持命令行和 Streamlit Web 界面两种使用方式。项目会先提取源码中的显式依赖关系，构建调用图，再结合局部子图上下文做安全审计，输出结构化审计报告和依赖图谱。
-![alt text](image/image.png)
-![alt text](image/image-2.png)
-![alt text](image/image-3.png)
-![alt text](image/image-1.png)
+![alt text](image/cli.png)
+![alt text](image/web-1.png)
+![alt text](image/web-2.png)
+![alt text](image/web-3.png)
 ## 功能概览
 
 - 多语言源码扫描：支持 `.py`、`.go`、`.js`、`.java`、`.cpp`、`.php`、`.c`、`.cs` 等常见源码文件

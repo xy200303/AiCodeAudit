@@ -1,13 +1,46 @@
+# ==============================
+# AI Code Audit 配置示例
+# 复制为 config.yaml 后按需修改
+# ==============================
+
 openai:
+  # OpenAI / OpenAI 兼容接口的 API Key
+  # 必填，示例值仅作占位
   api_key: your-api-key
+
+  # OpenAI / 代理服务的基础地址
+  # 官方接口通常为 https://api.openai.com/v1
   base_url: https://api.openai-proxy.org/v1
+
+  # 单个源码分片允许的最大 token 数
+  # 值越大，单次发送给模型的上下文越多，但请求更慢、成本更高
+  # 如果模型上下文较小，建议适当调低
   max_per_tokens: 40000
+
+  # 使用的模型名称
+  # 建议选择遵循格式能力较强的模型
   model: gpt-4o-mini
+
+  # 单次请求超时时间，单位：秒
+  # 网络不稳定或项目较大时，可适当调高
   timeout_seconds: 60
+
+  # 单次请求失败后的最大重试次数
+  # 建议 2~5，过高会拖慢整体审计时间
   max_retries: 3
+
+  # 重试退避基线时间，单位：秒
+  # 实际等待时间会随重试次数递增
   retry_backoff_seconds: 2
+
+  # 并发请求上限
+  # 值越大速度越快，但更容易触发接口限流或本地资源竞争
+  # 若遇到 429、超时或不稳定，优先调小
   max_concurrency: 5
+
 project:
+  # 需要作为“配置文件”纳入分析范围的后缀
+  # 这些文件通常不会参与依赖图构建的核心调用关系，但会参与上下文审计
   config_file_ext:
   - .yaml
   - .xml
@@ -17,6 +50,10 @@ project:
   - .toml
   - .config
   - .settings
+
+  # 扫描时默认忽略的目录名
+  # 这里按“目录名匹配”，不是完整路径匹配
+  # 建议排除依赖目录、构建目录、测试目录和缓存目录
   exclude_dir:
   - node_modules
   - dist
@@ -54,8 +91,25 @@ project:
   - doc
   - .secrets
   - .env
+
+  # 单个文件大小上限，单位：MB
+  # 超过该值的文件会被跳过，避免大文件拖慢扫描
+  # 如果你要审计超大源码文件，可适当调高
   exclude_max_file_size: 1
+
+  # 依赖解析引擎
+  # 可选值：
+  # - auto: 对已接入静态解析的语言优先使用 Tree-sitter；未接入的语言使用 LLM
+  # - ast: 仅使用静态解析；若语言未接入或静态解析失败，则直接跳过，不回退 LLM
+  # - llm: 始终使用大模型提取依赖关系
+  # 建议：
+  # - 追求稳定性和可控性：ast
+  # - 兼顾覆盖率：auto
+  # - 依赖模型理解复杂语义：llm
   dependency_parse_engine: auto
+
+  # 需要扫描的源码文件后缀
+  # 只有这里列出的文件才会进入源码扫描与依赖提取流程
   source_file_ext:
   - .py
   - .go
@@ -68,5 +122,13 @@ project:
   - .c
   - .cs
   - .h
+
+  # Agent_2 审计局部子图的最大搜索深度
+  # 值越大，越容易拼出完整漏洞链路，但上下文也更长、审计更慢
+  # 一般建议 2~4
   audit_context_depth: 3
+
+  # 单次局部子图审计允许纳入的最大节点数
+  # 值越大，上下文覆盖越广，但噪音也可能增加
+  # 一般建议 10~30
   max_audit_nodes: 20

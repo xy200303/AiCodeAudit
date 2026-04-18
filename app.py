@@ -23,6 +23,295 @@ st.set_page_config(
 )
 
 
+def inject_global_styles():
+    st.markdown(
+        """
+        <style>
+        :root {
+          --bg: #f7f7f5;
+          --paper: #ffffff;
+          --line: #e7e5e4;
+          --text: #1f2937;
+          --muted: #6b7280;
+          --accent: #b45309;
+          --teal: #0f766e;
+          --warn: #b45309;
+          --danger: #b42318;
+          --shadow: 0 4px 18px rgba(15, 23, 42, 0.04);
+        }
+
+        .stApp {
+          background: var(--bg);
+          color: var(--text);
+        }
+
+        .main .block-container {
+          max-width: 1180px;
+          padding-top: 1.1rem;
+          padding-bottom: 2.5rem;
+        }
+
+        section[data-testid="stSidebar"] {
+          background: #fafaf9;
+          border-right: 1px solid var(--line);
+        }
+
+        section[data-testid="stSidebar"] * {
+          color: var(--text) !important;
+        }
+
+        div[data-testid="stMetric"] {
+          background: var(--paper);
+          border: 1px solid var(--line);
+          border-radius: 10px;
+          padding: 0.25rem 0.45rem;
+          box-shadow: none;
+        }
+
+        .hero-panel {
+          background: transparent;
+          border: 0;
+          border-bottom: 1px solid var(--line);
+          border-radius: 0;
+          padding: 0 0 0.8rem 0;
+          box-shadow: none;
+          margin-bottom: 0.85rem;
+        }
+
+        .eyebrow {
+          display: none;
+        }
+
+        .hero-title {
+          font-size: 1.6rem;
+          line-height: 1.15;
+          font-weight: 700;
+          color: var(--text);
+          margin: 0 0 0.35rem 0;
+        }
+
+        .hero-copy {
+          color: var(--muted);
+          font-size: 0.92rem;
+          line-height: 1.55;
+          margin: 0;
+          max-width: 780px;
+        }
+
+        .surface-card {
+          background: var(--paper);
+          border: 1px solid var(--line);
+          border-radius: 10px;
+          padding: 0.8rem 0.9rem;
+          box-shadow: none;
+          backdrop-filter: none;
+        }
+
+        .surface-card.tight {
+          padding: 0.7rem 0.85rem;
+        }
+
+        .section-kicker {
+          color: var(--muted);
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          font-size: 0.72rem;
+          font-weight: 600;
+          margin-bottom: 0.2rem;
+        }
+
+        .section-title {
+          margin: 0;
+          color: var(--text);
+          font-size: 1rem;
+          font-weight: 650;
+        }
+
+        .finding-card {
+          background: var(--paper);
+          border: 1px solid var(--line);
+          border-left: 2px solid #d6d3d1;
+          border-radius: 10px;
+          padding: 0.7rem 0.8rem 0.15rem 0.8rem;
+          box-shadow: none;
+          margin-bottom: 0.6rem;
+        }
+
+        .finding-card.high {
+          border-left-color: var(--danger);
+        }
+
+        .finding-card.medium {
+          border-left-color: var(--warn);
+        }
+
+        .finding-card.low {
+          border-left-color: var(--teal);
+        }
+
+        .finding-card.info {
+          border-left-color: #64748b;
+        }
+
+        .finding-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 1rem;
+          margin-bottom: 0.65rem;
+        }
+
+        .finding-title {
+          color: var(--text);
+          font-size: 0.93rem;
+          font-weight: 700;
+          margin: 0;
+        }
+
+        .finding-title.high {
+          color: var(--danger);
+        }
+
+        .finding-title.medium {
+          color: var(--warn);
+        }
+
+        .finding-title.low {
+          color: var(--teal);
+        }
+
+        .finding-title.info {
+          color: #475569;
+        }
+
+        .finding-meta {
+          color: var(--muted);
+          font-size: 0.86rem;
+          font-weight: 600;
+          white-space: nowrap;
+        }
+
+        .field-label {
+          color: var(--muted);
+          font-size: 0.78rem;
+          font-weight: 600;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          margin-bottom: 0.2rem;
+        }
+
+        .field-text {
+          color: var(--text);
+          line-height: 1.6;
+          margin-bottom: 0.65rem;
+          font-size: 0.93rem;
+        }
+
+        .badge {
+          display: inline-flex;
+          align-items: center;
+          padding: 0.2rem 0.5rem;
+          border-radius: 999px;
+          font-size: 0.74rem;
+          font-weight: 600;
+          border: 1px solid var(--line);
+          background: #fafaf9;
+        }
+
+        .badge.high { color: var(--danger); }
+        .badge.medium { color: var(--warn); }
+        .badge.low { color: var(--teal); }
+        .badge.info { color: #475569; }
+
+        .upload-tip {
+          color: var(--muted);
+          line-height: 1.7;
+          margin: 0;
+        }
+
+        div[data-testid="stFileUploader"] > section {
+          border-radius: 12px !important;
+          border: 1px dashed #d6d3d1 !important;
+          background: #fcfcfb !important;
+        }
+
+        .stTabs [data-baseweb="tab-list"] {
+          gap: 0.3rem;
+          background: transparent;
+          border-radius: 0;
+          padding: 0;
+          border: 1px solid var(--line);
+          border-left: 0;
+          border-right: 0;
+        }
+
+        .stTabs [data-baseweb="tab"] {
+          border-radius: 0;
+          padding: 0.38rem 0.75rem;
+          color: var(--muted);
+        }
+
+        .stTabs [aria-selected="true"] {
+          background: transparent;
+          color: var(--text) !important;
+          border-bottom: 2px solid var(--accent);
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_page_hero(title: str, description: str, eyebrow: str):
+    st.markdown(
+        f"""
+        <div class="hero-panel">
+          <h1 class="hero-title">{title}</h1>
+          <p class="hero-copy">{description}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_stat_strip(items: list[tuple[str, str]]):
+    columns = st.columns(len(items))
+    for column, (label, value) in zip(columns, items):
+        with column:
+            st.metric(label, value)
+
+
+def get_finding_badge_class(finding_type: str) -> str:
+    lowered = finding_type.lower()
+    if "高危" in finding_type or "critical" in lowered or "high" in lowered:
+        return "high"
+    if "中危" in finding_type or "medium" in lowered:
+        return "medium"
+    if "低危" in finding_type or "low" in lowered:
+        return "low"
+    return "info"
+
+
+def get_finding_level_label(finding_type: str) -> str:
+    badge_class = get_finding_badge_class(finding_type)
+    return {
+        "high": "高危",
+        "medium": "中危",
+        "low": "低危",
+        "info": "信息",
+    }.get(badge_class, "信息")
+
+
+def get_finding_priority(finding_type: str) -> int:
+    badge_class = get_finding_badge_class(finding_type)
+    return {
+        "high": 0,
+        "medium": 1,
+        "low": 2,
+        "info": 3,
+    }.get(badge_class, 4)
+
+
 def get_chinese_font_family() -> str:
     candidates = [
         "Microsoft YaHei",
@@ -409,8 +698,17 @@ def build_edge_dataframe(graph: nx.DiGraph):
 
 
 def render_analysis_page(workspace: Path):
-    st.title("分析")
-    st.caption("上传项目压缩包后，自动完成源码扫描、依赖分析与安全审计。")
+    render_page_hero(
+        "项目分析工作台",
+        "上传项目压缩包后，系统会自动完成源码扫描、依赖图构建与安全审计，并把结构化结果整理到可视化页面中。",
+        "Analysis Studio",
+    )
+    render_stat_strip([
+        ("工作目录", str(workspace)),
+        ("每批任务数", str(st.session_state.batch_size)),
+        ("文件保留策略", "保留" if st.session_state.keep_files else "分析后清理"),
+    ])
+    st.caption("推荐上传完整项目的 `zip` 压缩包。系统会自动解压、扫描源码、提取依赖，再生成结构化审计报告与 GraphML 图谱。")
 
     uploaded_file = st.file_uploader("上传项目压缩包", type=["zip"])
     if uploaded_file is None:
@@ -459,7 +757,11 @@ def get_selected_result(workspace: Path):
 
 
 def render_result_list_page(workspace: Path):
-    st.title("结果可视化")
+    render_page_hero(
+        "审计结果可视化",
+        "聚焦查看结构化风险项、攻击向量与修复建议。默认会隐藏纯“审计通过”块，让你把注意力留给真正需要处理的结果。",
+        "Result Review",
+    )
     results = get_selected_result(workspace)
     if not results:
         st.info("还没有可展示的结果，请先在“分析”页面执行一次审计。")
@@ -469,10 +771,11 @@ def render_result_list_page(workspace: Path):
     selected_label = st.selectbox("选择一个分析结果", list(result_map.keys()))
     selected = result_map[selected_label]
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("项目哈希", selected["project_hash"][:12])
-    col2.metric("GraphML", os.path.basename(selected["graph_path"]))
-    col3.metric("报告日志", os.path.basename(selected["report_path"]) if selected["report_path"] else "未生成")
+    render_stat_strip([
+        ("项目哈希", selected["project_hash"][:12]),
+        ("GraphML", os.path.basename(selected["graph_path"])),
+        ("报告日志", os.path.basename(selected["report_path"]) if selected["report_path"] else "未生成"),
+    ])
 
     if not selected["report_path"] or not os.path.exists(selected["report_path"]):
         st.warning("当前结果没有可用的审计日志。")
@@ -482,58 +785,119 @@ def render_result_list_page(workspace: Path):
     parsed_sections = parse_report(report_text)
     show_passed = st.toggle("显示审计通过结果", value=False, help="默认隐藏仅包含“审计通过”的审计块")
     show_raw_blocks = st.toggle("显示原始审计块", value=False, help="关闭可减少大量结果时的页面卡顿")
+    selected_levels = st.multiselect(
+        "风险等级筛选",
+        ["高危", "中危", "低危", "信息"],
+        default=["高危", "中危", "低危", "信息"],
+        help="只显示选中的风险等级",
+    )
+    sort_mode = st.selectbox(
+        "排序方式",
+        ["按风险等级（高到低）", "按文件顺序"],
+        index=0,
+        help="控制结果的展示顺序",
+    )
 
     if not parsed_sections:
         st.text_area("原始报告", report_text, height=400)
         return
 
-    visible_sections = parsed_sections if show_passed else [section for section in parsed_sections if has_non_pass_findings(section)]
+    visible_sections = []
+    for section in parsed_sections:
+        filtered_findings = []
+        for finding in section["findings"]:
+            if not show_passed and is_pass_finding(finding):
+                continue
+            if is_pass_finding(finding):
+                filtered_findings.append(finding)
+                continue
+            if get_finding_level_label(finding["type"]) in selected_levels:
+                filtered_findings.append(finding)
+
+        if filtered_findings:
+            visible_sections.append({
+                **section,
+                "findings": filtered_findings,
+            })
 
     total_findings = sum(len(section["findings"]) for section in parsed_sections)
-    visible_findings = sum(
-        len(section["findings"]) if show_passed else sum(1 for finding in section["findings"] if not is_pass_finding(finding))
-        for section in parsed_sections
-    )
+    visible_findings = sum(len(section["findings"]) for section in visible_sections)
 
-    st.caption(f"当前展示 {len(visible_sections)} 个审计块，{visible_findings} 条结果；原始报告共 {len(parsed_sections)} 个审计块，{total_findings} 条结果。")
+    render_stat_strip([
+        ("当前展示审计块", str(len(visible_sections))),
+        ("当前展示结果数", str(visible_findings)),
+        ("原始结果总数", str(total_findings)),
+    ])
 
     if not visible_sections:
-        st.info("当前结果中仅包含“审计通过”内容，已按设置隐藏。打开“显示审计通过结果”可查看完整输出。")
+        st.info("当前筛选条件下没有可展示结果。你可以调整风险等级筛选，或打开“显示审计通过结果”查看完整输出。")
         return
 
+    if sort_mode == "按风险等级（高到低）":
+        visible_sections = sorted(
+            visible_sections,
+            key=lambda section: min(
+                (get_finding_priority(finding["type"]) for finding in section["findings"] if not is_pass_finding(finding)),
+                default=99,
+            ),
+        )
+
     for section in visible_sections:
-        st.markdown(f"### {section['file_path']}")
+        st.markdown(f"#### {section['file_path']}")
         if not section["findings"]:
             st.code(section["raw"], language="text")
             continue
 
-        for finding in section["findings"]:
-            if not show_passed and is_pass_finding(finding):
-                continue
-            with st.container(border=True):
-                st.markdown(f"**漏洞类型**: {finding['type']}")
-                st.markdown(f"**位置**: {finding['location'] or '-'}")
-                if finding["feature"]:
-                    st.markdown("**代码特征**:")
-                    st.code(finding["feature"], language="text")
-                else:
-                    st.markdown("**代码特征**: -")
-                if finding["vector"]:
-                    st.markdown(f"**攻击向量**: {finding['vector']}")
-                if finding["impact"]:
-                    st.markdown(f"**潜在影响**: {finding['impact']}")
-                if finding["fix"]:
-                    st.markdown(f"**修复建议**: {finding['fix']}")
-        if show_raw_blocks:
-            raw_preview = section["raw"]
-            if len(raw_preview) > 4000:
-                raw_preview = raw_preview[:4000] + "\n\n...（原始审计块过长，已截断显示）"
-            with st.expander("查看本文件原始审计块"):
-                st.code(raw_preview, language="text")
+        findings_to_render = section["findings"]
+        if sort_mode == "按风险等级（高到低）":
+            findings_to_render = sorted(findings_to_render, key=lambda finding: get_finding_priority(finding["type"]))
+
+        for finding in findings_to_render:
+            badge_class = get_finding_badge_class(finding["type"])
+            level_label = get_finding_level_label(finding["type"])
+            st.markdown(
+                f"""
+                <div class="finding-card {badge_class}">
+                  <div class="finding-header">
+                    <h4 class="finding-title {badge_class}">{finding['type']}</h4>
+                    <div class="finding-meta">
+                      <span class="badge {badge_class}">{level_label}</span>
+                      <span class="badge">{finding['location'] or '-'}</span>
+                    </div>
+                  </div>
+                  <div class="field-label">代码特征</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if finding["feature"]:
+                st.code(finding["feature"], language="text")
+            else:
+                st.markdown('<div class="field-text">-</div>', unsafe_allow_html=True)
+            if finding["vector"]:
+                st.markdown('<div class="field-label">攻击向量</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="field-text">{finding["vector"]}</div>', unsafe_allow_html=True)
+            if finding["impact"]:
+                st.markdown('<div class="field-label">潜在影响</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="field-text">{finding["impact"]}</div>', unsafe_allow_html=True)
+            if finding["fix"]:
+                st.markdown('<div class="field-label">修复建议</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="field-text">{finding["fix"]}</div>', unsafe_allow_html=True)
+            if show_raw_blocks:
+                raw_preview = section["raw"]
+                if len(raw_preview) > 4000:
+                    raw_preview = raw_preview[:4000] + "\n\n...（原始审计块过长，已截断显示）"
+                with st.expander("查看本文件原始审计块"):
+                    st.code(raw_preview, language="text")
+        st.divider()
 
 
 def render_graph_page(workspace: Path):
-    st.title("依赖可视化")
+    render_page_hero(
+        "依赖图谱可视化",
+        "从交互图谱、静态预览和节点明细三个视角查看项目依赖结构，快速定位高耦合节点与关键调用单元。",
+        "Dependency Atlas",
+    )
     results = get_selected_result(workspace)
     if not results:
         st.info("还没有可展示的图谱，请先在“分析”页面执行一次审计。")
@@ -548,10 +912,11 @@ def render_graph_page(workspace: Path):
         return
 
     graph = nx.read_graphml(selected["graph_path"])
-    col1, col2, col3 = st.columns(3)
-    col1.metric("节点数", graph.number_of_nodes())
-    col2.metric("边数", graph.number_of_edges())
-    col3.metric("结果目录", Path(selected["output_dir"]).name)
+    render_stat_strip([
+        ("节点数", str(graph.number_of_nodes())),
+        ("边数", str(graph.number_of_edges())),
+        ("结果目录", Path(selected["output_dir"]).name),
+    ])
 
     graph_tab, static_tab, node_tab, edge_tab = st.tabs(["交互图谱", "静态预览", "节点列表", "边列表"])
 
@@ -585,8 +950,12 @@ def init_session_state():
 def main():
     workspace = ensure_workspace()
     init_session_state()
+    inject_global_styles()
 
     with st.sidebar:
+        st.markdown("## AI Code Audit")
+        st.caption("上传项目、生成依赖图、查看审计结果")
+        st.markdown("---")
         st.markdown("## 运行参数")
         st.session_state.batch_size = st.slider("每批任务数", min_value=1, max_value=30, value=st.session_state.batch_size)
         st.session_state.keep_files = st.checkbox("保留上传与解压文件", value=st.session_state.keep_files)
