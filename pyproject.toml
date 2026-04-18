@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-code-audit"
+version = "0.1.0"
+description = "AI-assisted code audit tool with Streamlit UI, dependency graph extraction, and structured security reporting."
+readme = "README.md"
+requires-python = ">=3.10"
+dynamic = ["dependencies"]
+
+[project.scripts]
+aicodeaudit = "main:main"
+
+[tool.setuptools]
+py-modules = ["main", "app"]
+
+[tool.setuptools.packages.find]
+include = ["audit*", "config*", "models*", "prompt*", "utils*"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }

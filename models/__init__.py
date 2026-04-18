@@ -30,6 +30,7 @@ class ProjectConfig(BaseModel):
     exclude_dir: List[str] = Field(default_factory=list)
     exclude_max_file_size: float
     source_file_ext: List[str] = Field(default_factory=list)
+    dependency_parse_engine: str = "auto"
     audit_context_depth: int = 2
     max_audit_nodes: int = 12
 

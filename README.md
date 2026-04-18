@@ -8,7 +8,7 @@
 ## 功能概览
 
 - 多语言源码扫描：支持 `.py`、`.go`、`.js`、`.java`、`.cpp`、`.php`、`.c`、`.cs` 等常见源码文件
-- AI 依赖提取：按代码切片提取显式调用关系，生成 `GraphML` 依赖图
+- Tree-sitter + AI 依赖提取：优先基于 Tree-sitter 静态提取显式调用关系，失败时再回退到大模型，生成 `GraphML` 依赖图
 - AI 安全审计：基于局部调用上下文识别高置信度漏洞，降低误报
 - 结构化报告：审计结果采用稳定标签结构，便于解析、展示和后续扩展
 - Web 可视化：支持上传项目压缩包，一键分析、结果列表查看、依赖图谱展示
@@ -17,22 +17,38 @@
 
 ## 技术原理
 
-项目整体分为两个阶段。第一阶段会扫描项目目录，读取源码与配置文件，并按 token 对源码做切片，保留原始行号偏移，再交给 Agent_1 提取显式依赖关系，最终构建项目调用图。第二阶段会围绕图中的节点提取局部子图上下文，而不是枚举整条全路径，再交给 Agent_2 判断是否存在“外部输入 -> 危险操作 -> 缺少校验/转义/鉴权”的真实漏洞链路。最终输出 `graphml` 依赖图和结构化审计报告，供命令行或 Streamlit 页面展示。
+项目整体分为两个阶段。第一阶段会扫描项目目录，读取源码与配置文件，并按 token 对源码做切片，保留原始行号偏移。对于 `.py`、`.js`、`.ts`、`.java`、`.go`、`.php`、`.c`、`.cpp`、`.cs` 等语言，系统会优先使用 Tree-sitter 做静态依赖提取；若当前环境未安装语法依赖或静态解析失败，再回退到 Agent_1 进行大模型提取，最终构建项目调用图。第二阶段会围绕图中的节点提取局部子图上下文，而不是枚举整条全路径，再交给 Agent_2 判断是否存在“外部输入 -> 危险操作 -> 缺少校验/转义/鉴权”的真实漏洞链路。最终输出 `graphml` 依赖图和结构化审计报告，供命令行或 Streamlit 页面展示。
 
 ## 项目结构
 
 ```text
 AiCodeAudit/
-├─ audit/                  # 扫描、依赖提取、审计调度
-├─ config/                 # 配置加载
-├─ models/                 # 数据模型
-├─ prompt/                 # Agent 提示词模板
-├─ utils/                  # 通用工具函数
-├─ app.py                  # Streamlit Web 服务入口
-├─ main.py                 # 命令行入口
-├─ config.example.yaml     # 配置示例
-├─ config.yaml             # 实际运行配置
-└─ requirements.txt
+├─ audit/                         # 审计核心流程
+│  ├─ __init__.py
+│  ├─ agent.py                    # Agent_1 / Agent_2 调度与模型调用
+│  ├─ scaner.py                   # 项目扫描、分片与文件遍历
+│  ├─ service.py                  # 审计主流程、图生成、报告输出
+│  ├─ tool.py                     # 局部子图、静态安全线索提取
+│  └─ tree_sitter_parser.py       # Tree-sitter 多语言静态依赖解析
+├─ config/                        # 配置加载与默认配置生成
+│  ├─ __init__.py
+│  └─ config.py
+├─ models/                        # Pydantic 数据模型
+│  └─ __init__.py
+├─ prompt/                        # Agent 提示词模板
+│  └─ __init__.py
+├─ utils/                         # 通用工具函数、代码单元解析、图构建
+│  └─ __init__.py
+├─ image/                         # README / Web 展示图片资源
+├─ output/                        # 审计输出目录
+│  └─ streamlit_runs/             # Web 模式运行结果
+├─ 演示项目/                      # 本地演示样例项目
+├─ app.py                         # Streamlit Web 服务入口
+├─ main.py                        # 命令行入口
+├─ config.example.yaml            # 配置示例
+├─ config.yaml                    # 实际运行配置
+├─ requirements.txt               # Python 依赖
+└─ README.md
 ```
 
 ## 安装
@@ -49,6 +65,16 @@ cd AiCodeAudit
 ```bash
 pip install -r requirements.txt
 ```
+
+或者使用 `pyproject.toml` 方式安装当前项目：
+
+```bash
+pip install -e .
+```
+
+当前项目以 `requirements.txt` 作为依赖单一事实来源，`pyproject.toml` 会直接读取这份依赖列表，因此日后新增或调整依赖时只需要维护 `requirements.txt`。
+
+如果你需要启用 Tree-sitter 静态依赖提取，请保持 `requirements.txt` 中的版本组合不变。当前项目使用的是已验证兼容的组合：`tree-sitter==0.21.3` 与 `tree-sitter-languages==1.10.2`。
 
 3. 准备配置文件
 
@@ -72,6 +98,12 @@ copy config.example.yaml config.yaml
 
 ```bash
 python main.py -d <target_dir> -o <output_dir> -b <batch_size>
+```
+
+如果通过 `pyproject.toml` 安装了项目，也可以直接使用：
+
+```bash
+aicodeaudit -d <target_dir> -o <output_dir> -b <batch_size>
 ```
 
 ### 参数说明
@@ -186,8 +218,15 @@ cursor.execute("SELECT * FROM users WHERE name = '" + username + "'")
 - `config_file_ext`：需要识别的配置文件后缀
 - `exclude_dir`：默认排除目录
 - `exclude_max_file_size`：单文件大小限制
+- `dependency_parse_engine`：依赖解析引擎，可选 `auto`、`ast`、`llm`
 - `audit_context_depth`：局部审计子图深度
 - `max_audit_nodes`：单次审计最大上下文节点数
+
+`dependency_parse_engine` 说明：
+
+- `auto`：对已接入静态解析的语言优先使用 Tree-sitter；若该语言暂未接入静态解析，则使用 LLM
+- `ast`：仅使用静态解析；若静态解析失败或当前语言未接入静态解析，则直接跳过，不回退到 LLM
+- `llm`：始终使用大模型提取依赖
 
 ## 依赖
 
@@ -195,6 +234,8 @@ cursor.execute("SELECT * FROM users WHERE name = '" + username + "'")
 
 - `openai`
 - `tiktoken`
+- `tree-sitter`
+- `tree-sitter-languages`
 - `networkx`
 - `streamlit`
 - `matplotlib`
@@ -203,11 +244,6 @@ cursor.execute("SELECT * FROM users WHERE name = '" + username + "'")
 
 完整依赖请见 `requirements.txt`。
 
-## 注意事项
-
-- 请不要将真实密钥提交到仓库，建议仅在本地维护 `config.yaml`
-- 新版页面优先解析结构化报告，同时兼容旧版半结构化日志
-- 旧的审计结果文件不会自动升级格式，如需获得新结构，请重新执行一次审计
 
 ## 许可证
 

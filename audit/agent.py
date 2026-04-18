@@ -7,6 +7,7 @@ from openai import AsyncOpenAI
 
 from config import C
 from models import SourceFile
+from audit.tree_sitter_parser import extract_code_units_with_tree_sitter, supports_tree_sitter
 from prompt import build_agent_1_prompt, build_agent_2_prompt
 from utils import gen_line_code, parse_code_uint
 
@@ -73,6 +74,26 @@ async def agent_1(source_file: SourceFile):
     """
     使用语言模型解析代码中的依赖关系。
     """
+    parse_engine = getattr(C.project, "dependency_parse_engine", "auto").lower()
+
+    if parse_engine not in {"auto", "ast", "llm"}:
+        logger.warning("未知 dependency_parse_engine 配置: {}，已回退为 auto", parse_engine)
+        parse_engine = "auto"
+
+    if parse_engine in {"auto", "ast"}:
+        if supports_tree_sitter(source_file.extension):
+            parsed = extract_code_units_with_tree_sitter(source_file)
+            if parsed is not None:
+                logger.debug("Agent_1 使用静态解析提取成功: {} -> {} 条依赖", source_file.path, len(parsed))
+                return parsed
+            logger.warning("静态解析失败，当前配置禁止回退到 LLM，返回空结果: {}", source_file.path)
+            return None
+        elif parse_engine == "ast":
+            logger.warning("当前文件类型暂不支持静态解析，且配置为 ast-only，返回空结果: {}", source_file.path)
+            return None
+        elif parse_engine == "auto":
+            logger.debug("当前文件类型未接入静态解析，auto 模式回退到 LLM: {}", source_file.path)
+
     numbered_code = gen_line_code(source_file.source_code, start_line=source_file.start_line)
     prompt = build_agent_1_prompt(source_file.extension)
     if source_file.extension:

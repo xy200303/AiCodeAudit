@@ -1,40 +1,206 @@
 from collections import deque
+import os
 import re
 
 
-SECURITY_HINT_PATTERNS = {
+COMMON_SECURITY_HINT_PATTERNS = {
     "input_sources": [
-        r"\brequest\.(args|form|json|values)\b",
-        r"\b(req|request)\.(query|body|params)\b",
-        r"\b(getParameter|FormValue|URL\.Query|input)\b",
-        r"\b(os\.environ|process\.env|getenv|Request\.(Query|Form|Body))\b",
-        r"\b(_GET|_POST|_REQUEST|_FILES|_ENV)\b",
-        r"\b(upload|file|filename|filepath|path)\b",
+        r"\b(upload|file|filename|filepath|path|callback|redirect)\b",
     ],
     "dangerous_sinks": [
         r"\b(eval|exec)\b",
-        r"\b(subprocess\.(run|Popen|call)|os\.system|Process\.Start|Runtime\.getRuntime\(\)\.exec|child_process\.(exec|spawn))\b",
-        r"\b(system|popen|ProcessBuilder|exec\.Command)\b",
-        r"\b(select|insert|update|delete)\b.*(\+|format\(|f\")",
-        r"\b(include|require|require_once|import_module|load)\b",
-        r"\b(open|read|write|File|FileInputStream|FileOutputStream|fs\.)\b",
-        r"\b(requests\.(get|post)|http\.Get|fetch|axios\.)\b",
+        r"\b(select|insert|update|delete)\b.*(\+|format\(|f\"|sprintf\()",
         r"\b(innerHTML|dangerouslySetInnerHTML|document\.write)\b",
-        r"\b(pickle\.load|pickle\.loads|yaml\.load|unserialize)\b",
     ],
     "safety_signals": [
-        r"\b(PreparedStatement|parameterized|placeholders?)\b",
-        r"\bexecute\s*\([^)]*[,?]\s*[\w\[\{]",
-        r"\b(yaml\.safe_load|html/template|autoescape)\b",
-        r"\b(path\.normalize|Path\.GetFullPath|realpath|basename)\b",
-        r"\b(whitelist|allowlist|sanitize|escape|validate|validator)\b",
-        r"\b(auth|authorize|permission|acl|role)\b",
-        r"\b(subprocess\.(run|Popen)\s*\(\s*\[|exec\.Command\s*\(\s*[^\"']+\s*,)\b",
+        r"\b(whitelist|allowlist)\b",
+        r"\b(parameterized|prepared|placeholder)\b",
     ],
     "validation_signals": [
         r"\b(validate|sanitize|escape|check|verify|guard|filter)\b",
         r"\b(auth|authorize|permission|acl|role|requiredLogin|requiredAuth)\b",
         r"\b(is_safe|safe_path|normalized|canonical)\b",
+    ],
+}
+
+
+LANGUAGE_SECURITY_HINT_PATTERNS = {
+    ".py": {
+        "input_sources": [
+            r"\brequest\.(args|form|json|values|files)\b",
+            r"\b(input|sys\.argv|os\.environ|getenv)\b",
+        ],
+        "dangerous_sinks": [
+            r"\b(subprocess\.(run|Popen|call)|os\.system)\b",
+            r"\b(pickle\.load|pickle\.loads|yaml\.load)\b",
+            r"\b(requests\.(get|post|request))\b",
+            r"\b(open|Path\.open|read_text|write_text)\b",
+            r"\b(sqlite3|pymysql|psycopg2|sqlalchemy)\b",
+        ],
+        "safety_signals": [
+            r"\b(yaml\.safe_load|html\.escape|markupsafe\.escape)\b",
+            r"\b(pathlib\.Path|resolve\(\))\b",
+            r"\b(subprocess\.(run|Popen)\s*\(\s*\[)\b",
+        ],
+        "validation_signals": [
+            r"\b(pydantic|validator|marshmallow|schema\.load)\b",
+        ],
+    },
+    ".js": {
+        "input_sources": [
+            r"\b(req|request)\.(query|body|params|headers|files)\b",
+            r"\b(process\.env|window\.location|document\.location)\b",
+        ],
+        "dangerous_sinks": [
+            r"\b(child_process\.(exec|spawn|execSync))\b",
+            r"\b(require\s*\(|import\s*\()\b",
+            r"\b(fetch|axios\.(get|post|request))\b",
+            r"\b(fs\.(readFile|readFileSync|writeFile|writeFileSync|createReadStream|createWriteStream))\b",
+        ],
+        "safety_signals": [
+            r"\b(path\.normalize|path\.resolve)\b",
+            r"\b(DOMPurify|validator\.)\b",
+        ],
+        "validation_signals": [
+            r"\b(zod|joi|yup|express-validator)\b",
+        ],
+    },
+    ".ts": {
+        "input_sources": [
+            r"\b(req|request)\.(query|body|params|headers|files)\b",
+            r"\b(process\.env)\b",
+        ],
+        "dangerous_sinks": [
+            r"\b(child_process\.(exec|spawn|execSync))\b",
+            r"\b(fetch|axios\.(get|post|request))\b",
+            r"\b(fs\.(readFile|readFileSync|writeFile|writeFileSync))\b",
+        ],
+        "safety_signals": [
+            r"\b(path\.normalize|path\.resolve)\b",
+        ],
+        "validation_signals": [
+            r"\b(zod|joi|class-validator|nestjs\/common)\b",
+        ],
+    },
+    ".java": {
+        "input_sources": [
+            r"\b(request\.getParameter|@RequestParam|@PathVariable|@RequestBody)\b",
+            r"\b(System\.getenv|MultipartFile)\b",
+        ],
+        "dangerous_sinks": [
+            r"\b(Runtime\.getRuntime\(\)\.exec|ProcessBuilder)\b",
+            r"\b(HttpURLConnection|RestTemplate|WebClient)\b",
+            r"\b(FileInputStream|FileOutputStream|Files\.(read|write))\b",
+            r"\b(Statement|createStatement|executeQuery|executeUpdate)\b",
+        ],
+        "safety_signals": [
+            r"\b(PreparedStatement|@PreAuthorize|hasRole)\b",
+            r"\b(Paths\.get|normalize\(\)|toRealPath\(\))\b",
+        ],
+        "validation_signals": [
+            r"\b(@Valid|Validator|BindingResult)\b",
+        ],
+    },
+    ".go": {
+        "input_sources": [
+            r"\b(r\.URL\.Query|FormValue|PostFormValue|ShouldBindJSON|BindJSON)\b",
+            r"\b(os\.Getenv|c\.Param|c\.Query|c\.PostForm)\b",
+        ],
+        "dangerous_sinks": [
+            r"\b(exec\.Command|sql\.DB|QueryRow|Query|Exec)\b",
+            r"\b(http\.Get|http\.Post|client\.Do)\b",
+            r"\b(os\.Open|os\.Create|ioutil\.ReadFile|os\.WriteFile)\b",
+            r"\b(template\.HTML|text/template)\b",
+        ],
+        "safety_signals": [
+            r"\b(html/template|filepath\.Clean|filepath\.Join)\b",
+            r"\b(PrepareContext|QueryContext|ExecContext)\b",
+        ],
+        "validation_signals": [
+            r"\b(validator\.New|ShouldBind|binding:)\b",
+        ],
+    },
+    ".php": {
+        "input_sources": [
+            r"\b(_GET|_POST|_REQUEST|_FILES|_COOKIE|_SERVER|_ENV)\b",
+        ],
+        "dangerous_sinks": [
+            r"\b(include|include_once|require|require_once)\b",
+            r"\b(system|exec|shell_exec|passthru|proc_open)\b",
+            r"\b(mysqli_query|query|exec|PDO)\b",
+            r"\b(file_get_contents|fopen|fwrite|readfile)\b",
+            r"\b(unserialize)\b",
+        ],
+        "safety_signals": [
+            r"\b(PDO::prepare|prepare\s*\(|realpath|basename)\b",
+        ],
+        "validation_signals": [
+            r"\b(filter_input|htmlspecialchars|preg_match)\b",
+        ],
+    },
+    ".c": {
+        "input_sources": [
+            r"\b(argv|getenv|recv|read|fgets|scanf)\b",
+        ],
+        "dangerous_sinks": [
+            r"\b(system|popen|execl|execv|sprintf|strcpy|strcat|gets)\b",
+            r"\b(fopen|open|write|read)\b",
+        ],
+        "safety_signals": [
+            r"\b(snprintf|strncpy|realpath)\b",
+        ],
+        "validation_signals": [
+            r"\b(strlen|sizeof|strncmp|memcmp)\b",
+        ],
+    },
+    ".cpp": {
+        "input_sources": [
+            r"\b(argv|getenv|recv|read|std::cin)\b",
+        ],
+        "dangerous_sinks": [
+            r"\b(system|popen|sprintf|strcpy|strcat)\b",
+            r"\b(std::ifstream|std::ofstream|fstream)\b",
+        ],
+        "safety_signals": [
+            r"\b(snprintf|std::filesystem::canonical|std::array)\b",
+        ],
+        "validation_signals": [
+            r"\b(std::regex|std::clamp|size\(\))\b",
+        ],
+    },
+    ".cs": {
+        "input_sources": [
+            r"\b(Request\.(Query|Form|Body|Headers)|IFormFile)\b",
+            r"\b(Environment\.GetEnvironmentVariable)\b",
+        ],
+        "dangerous_sinks": [
+            r"\b(Process\.Start|SqlCommand|ExecuteReader|ExecuteNonQuery)\b",
+            r"\b(File\.(ReadAllText|WriteAllText|OpenRead|OpenWrite))\b",
+            r"\b(HttpClient\.(GetAsync|PostAsync|SendAsync))\b",
+        ],
+        "safety_signals": [
+            r"\b(Path\.GetFullPath|Path\.Combine|SqlParameter)\b",
+            r"\b(Authorize|RequireRole)\b",
+        ],
+        "validation_signals": [
+            r"\b(ModelState\.IsValid|DataAnnotations|FluentValidation)\b",
+        ],
+    },
+}
+
+
+SECURITY_HINT_PATTERNS = {
+    "input_sources": [
+        *COMMON_SECURITY_HINT_PATTERNS["input_sources"],
+    ],
+    "dangerous_sinks": [
+        *COMMON_SECURITY_HINT_PATTERNS["dangerous_sinks"],
+    ],
+    "safety_signals": [
+        *COMMON_SECURITY_HINT_PATTERNS["safety_signals"],
+    ],
+    "validation_signals": [
+        *COMMON_SECURITY_HINT_PATTERNS["validation_signals"],
     ],
 }
 
@@ -49,6 +215,20 @@ def _collect_pattern_hits(text: str, patterns: list[str]) -> list[str]:
     return hits
 
 
+def _merge_security_hint_patterns(extension: str) -> dict:
+    merged = {key: list(patterns) for key, patterns in SECURITY_HINT_PATTERNS.items()}
+    language_patterns = LANGUAGE_SECURITY_HINT_PATTERNS.get(extension.lower(), {})
+    for key, patterns in language_patterns.items():
+        merged.setdefault(key, [])
+        merged[key].extend(patterns)
+    return merged
+
+
+def _get_extension_from_node(node_data) -> str:
+    path = str(node_data.get("path", "") or "")
+    return os.path.splitext(path)[1].lower()
+
+
 def extract_security_hints(node_data) -> dict:
     text_parts = [
         str(node_data.get("source_name", "")),
@@ -57,9 +237,10 @@ def extract_security_hints(node_data) -> dict:
         str(node_data.get("source_code", "")),
     ]
     corpus = "\n".join(part for part in text_parts if part)
+    patterns = _merge_security_hint_patterns(_get_extension_from_node(node_data))
     return {
         key: _collect_pattern_hits(corpus, patterns)
-        for key, patterns in SECURITY_HINT_PATTERNS.items()
+        for key, patterns in patterns.items()
     }
 
 

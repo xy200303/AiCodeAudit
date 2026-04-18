@@ -1,5 +1,5 @@
 openai:
-  api_key: sk-cIqn0rQczxDMicXKWFISZ6c6ajYUub1dcIw89jP43kwgk67f
+  api_key: your-api-key
   base_url: https://api.openai-proxy.org/v1
   max_per_tokens: 40000
   model: gpt-4o-mini
@@ -55,7 +55,7 @@ project:
   - .secrets
   - .env
   exclude_max_file_size: 1
-  dependency_parse_engine: ast
+  dependency_parse_engine: auto
   source_file_ext:
   - .py
   - .go

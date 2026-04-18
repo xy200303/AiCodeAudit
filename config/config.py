@@ -31,6 +31,7 @@ def create_default_config(file_path):
                           "tmp", "temp", "cache", "logs", "docker", "containers", "k8s", "kube", ".circleci", ".github",
                           ".travis", "docs", "doc", ".secrets", ".env"],
             "exclude_max_file_size": 1,
+            "dependency_parse_engine": "auto",
             "audit_context_depth": 2,
             "max_audit_nodes": 12
         }
