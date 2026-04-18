@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 from audit import get_all_source_files_bfs, print_source_dir, scan_project_struct
 from audit.agent import agent_1, agent_2
-from audit.tool import gen_text_from_local_subgraph, get_local_subgraph_nodes
+from audit.tool import gen_text_from_local_subgraph, get_local_subgraph_nodes, security_hint_score
 from config import C
 from models import SourceFile
 from utils import count_text_tokens, gen_graph_by_codeunits, write_file
@@ -100,6 +100,7 @@ def build_audit_payloads(graph: nx.DiGraph) -> List[str]:
         payload_candidates.append({
             "payload": payload,
             "score": (
+                security_hint_score(node_data) * 5 +
                 graph.in_degree(node) +
                 graph.out_degree(node) +
                 len(local_nodes) * 2 +
