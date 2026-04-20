@@ -1,6 +1,6 @@
 openai:
-  api_key: sk-i8dQlYFeSEe6IR0xq2QCwzxJgK52aBwfeLCZ9C1fnYnU1tzl
-  base_url: https://openrouter.fans/v1
+  api_key: xxxxxx
+  base_url: xxxxxxxxx
   max_input_tokens: 40000
   model: deepseek-ai/DeepSeek-V3.2
   timeout_seconds: 60
