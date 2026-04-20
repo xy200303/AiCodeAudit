@@ -18,6 +18,11 @@
 
 ## 最新版更新日志
 
+- Token 预算配置收敛为 `openai.max_input_tokens`，程序会自动预留提示词与协议开销并推导源码分片预算
+- 新增 `openai.request_overhead_tokens` 配置，用于为 system prompt、角色字段与请求包装预留 token
+- 新增请求体本地 token 预检，超过模型输入上限时会在本地直接报错，避免频繁触发上游 `tokens_limit_reached`
+- 增强小上下文模型兼容性，`Agent_1` 会自动收缩源码分片预算，`Agent_2` 会在超限时自动缩小局部子图上下文
+- 优化非 OpenAI 官方模型的 tokenizer 兼容逻辑，`qwen`、`deepseek` 等模型会自动回退到兼容编码并缓存结果，减少重复告警
 - 新增 Streamlit Web 服务，支持上传项目 `zip` 压缩包后直接执行分析
 - 侧边栏升级为 `分析`、`结果可视化`、`依赖可视化` 三个功能页，便于分步骤查看结果
 - 修复审计日志文件缺失时的读取报错，增强结果页容错能力
@@ -226,12 +231,21 @@ cursor.execute("SELECT * FROM users WHERE name = '" + username + "'")
 
 - `api_key`：接口密钥
 - `base_url`：OpenAI 或兼容接口地址
-- `max_per_tokens`：单次切片 token 上限
+- `max_input_tokens`：单次请求允许的最大输入 token，程序会自动扣除提示词和请求包装开销，再推导源码分片预算
+- `request_overhead_tokens`：为 system prompt、角色字段、协议包装等额外成本预留的 token 数，默认 `512`
 - `model`：使用的模型名称
 - `timeout_seconds`：单次请求超时秒数
 - `max_retries`：失败重试次数
 - `retry_backoff_seconds`：重试退避基线秒数
 - `max_concurrency`：并发上限
+
+关于 token 预算，当前版本有以下行为：
+
+- 推荐只配置 `max_input_tokens`，不再需要手工维护源码切片大小
+- 如果模型或代理服务的真实输入上限与模型名不一致，建议显式填写 `max_input_tokens`
+- 当请求消息在本地估算后已超过上限时，程序会先在本地抛错，而不是直接把超长请求发送到上游接口
+- 对 `qwen`、`deepseek` 等未被 `tiktoken` 内置识别的模型，程序会自动使用兼容编码做 token 估算
+- 旧配置中的 `max_per_tokens` 仍可继续读取，但仅作为兼容字段，不再推荐使用
 
 ### 项目扫描配置
 

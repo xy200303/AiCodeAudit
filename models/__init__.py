@@ -18,8 +18,10 @@ class SourceDir(BaseModel):
 class OpenAIConfig(BaseModel):
     api_key: str
     base_url: str
-    max_per_tokens: int
     model: str
+    max_input_tokens: int | None = None
+    max_per_tokens: int | None = None
+    request_overhead_tokens: int = 512
     timeout_seconds: float = 60.0
     max_retries: int = 3
     retry_backoff_seconds: float = 2.0

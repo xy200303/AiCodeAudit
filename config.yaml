@@ -1,8 +1,8 @@
 openai:
-  api_key: sk-cIqn0rQczxDMicXKWFISZ6c6ajYUub1dcIw89jP43kwgk67f
-  base_url: https://api.openai-proxy.org/v1
-  max_per_tokens: 40000
-  model: gpt-4o-mini
+  api_key: sk-i8dQlYFeSEe6IR0xq2QCwzxJgK52aBwfeLCZ9C1fnYnU1tzl
+  base_url: https://openrouter.fans/v1
+  max_input_tokens: 40000
+  model: deepseek-ai/DeepSeek-V3.2
   timeout_seconds: 60
   max_retries: 3
   retry_backoff_seconds: 2

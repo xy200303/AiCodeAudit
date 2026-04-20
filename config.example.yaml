@@ -12,10 +12,15 @@ openai:
   # 官方接口通常为 https://api.openai.com/v1
   base_url: https://api.openai-proxy.org/v1
 
-  # 单个源码分片允许的最大 token 数
-  # 值越大，单次发送给模型的上下文越多，但请求更慢、成本更高
-  # 如果模型上下文较小，建议适当调低
-  max_per_tokens: 40000
+  # 模型整条请求允许的最大输入 token 数
+  # 代码会基于这个值自动扣除 system prompt 和协议开销，再推导源码分片预算
+  # 如果代理服务或国内兼容接口的真实上限与你使用的模型名不一致，建议手动填写
+  # 例如 gpt-4.1-mini 可填 8000
+  max_input_tokens: 8000
+
+  # 请求额外预留的 token 开销
+  # 用于 system prompt、角色字段、协议包装等额外成本
+  request_overhead_tokens: 512
 
   # 使用的模型名称
   # 建议选择遵循格式能力较强的模型

@@ -1,6 +1,7 @@
 import hashlib
 import re
 import sys
+from functools import lru_cache
 from typing import List
 
 import networkx as nx
@@ -10,6 +11,16 @@ from matplotlib import pyplot as plt
 
 from config import C
 from models import CodeUnit
+
+
+MODEL_TOKENIZER_ALIASES = {
+    "qwen": "cl100k_base",
+    "deepseek": "cl100k_base",
+}
+
+MODEL_MAX_INPUT_TOKENS = {
+    "gpt-4.1-mini": 8000,
+}
 
 
 def is_cmd_mode():
@@ -26,11 +37,34 @@ def is_cmd_mode():
     return True
 
 
+def _resolve_fallback_encoding(model_name: str) -> str | None:
+    normalized_name = model_name.lower()
+    for prefix, encoding_name in MODEL_TOKENIZER_ALIASES.items():
+        if normalized_name.startswith(prefix):
+            return encoding_name
+    return None
+
+
+def _resolve_known_model_max_input_tokens(model_name: str) -> int | None:
+    normalized_name = model_name.lower()
+    for prefix, max_tokens in MODEL_MAX_INPUT_TOKENS.items():
+        if normalized_name.startswith(prefix):
+            return max_tokens
+    return None
+
+
+@lru_cache(maxsize=8)
 def get_encoding():
+    model_name = C.openai.model
     try:
-        return tiktoken.encoding_for_model(C.openai.model)
+        return tiktoken.encoding_for_model(model_name)
     except KeyError:
-        logger.warning("未找到模型 {} 对应的 tokenizer，回退到 cl100k_base", C.openai.model)
+        fallback_encoding = _resolve_fallback_encoding(model_name)
+        if fallback_encoding is not None:
+            logger.info("模型 {} 未内置 tokenizer，使用兼容编码 {}", model_name, fallback_encoding)
+            return tiktoken.get_encoding(fallback_encoding)
+
+        logger.warning("未找到模型 {} 对应的 tokenizer，回退到 cl100k_base", model_name)
         return tiktoken.get_encoding("cl100k_base")
 
 
@@ -45,6 +79,26 @@ def count_message_tokens(messages: list) -> int:
         text = f"{message['role']}: {message['content']}"
         total_tokens += len(encoding.encode(text))
     return total_tokens
+
+
+def get_effective_max_input_tokens() -> int | None:
+    configured_limit = getattr(C.openai, "max_input_tokens", None)
+    known_limit = _resolve_known_model_max_input_tokens(C.openai.model)
+    if configured_limit and known_limit:
+        return min(configured_limit, known_limit)
+    legacy_limit = getattr(C.openai, "max_per_tokens", None)
+    return configured_limit or known_limit or legacy_limit
+
+
+def get_available_text_token_budget(prompt: str, reserve_tokens: int = 0) -> int | None:
+    max_input_tokens = get_effective_max_input_tokens()
+    if max_input_tokens is None:
+        return None
+
+    prompt_tokens = count_message_tokens([{"role": "system", "content": prompt}])
+    overhead_tokens = max(0, getattr(C.openai, "request_overhead_tokens", 512))
+    budget = max_input_tokens - prompt_tokens - overhead_tokens - max(0, reserve_tokens)
+    return max(128, budget)
 
 
 def gen_line_code(text: str, start_line: int = 1):

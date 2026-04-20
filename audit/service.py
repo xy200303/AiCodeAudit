@@ -14,10 +14,89 @@ from audit.agent import agent_1, agent_2
 from audit.tool import gen_text_from_local_subgraph, get_local_subgraph_nodes, security_hint_score
 from config import C
 from models import SourceFile
-from utils import count_text_tokens, gen_graph_by_codeunits, write_file
+from prompt import build_agent_1_prompt, build_agent_2_prompt
+from utils import (
+    count_message_tokens,
+    count_text_tokens,
+    gen_graph_by_codeunits,
+    get_available_text_token_budget,
+    get_effective_max_input_tokens,
+    write_file,
+)
 
 
 PASS_CONCLUSIONS = {"审计通过", "结构化审计通过结果", "审核通过"}
+
+
+def _estimate_message_tokens(prompt: str, text: str) -> int:
+    return count_message_tokens([
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": text},
+    ])
+
+
+def _resolve_agent_1_chunk_token_size() -> int:
+    effective_input_limit = get_effective_max_input_tokens()
+    prompt_candidates = [build_agent_1_prompt(ext) for ext in C.project.source_file_ext] or [build_agent_1_prompt(".txt")]
+    prompt_budget_candidates = [
+        budget
+        for budget in (get_available_text_token_budget(prompt) for prompt in prompt_candidates)
+        if budget is not None
+    ]
+    if not prompt_budget_candidates:
+        legacy_chunk_size = getattr(C.openai, "max_per_tokens", None)
+        return legacy_chunk_size or 4096
+
+    safe_chunk_size = min(prompt_budget_candidates)
+    legacy_chunk_size = getattr(C.openai, "max_per_tokens", None)
+    if legacy_chunk_size is not None:
+        safe_chunk_size = min(safe_chunk_size, legacy_chunk_size)
+
+    if effective_input_limit is not None:
+        logger.warning(
+            "模型 {} 的输入上限为 {} tokens，源码分片预算已自动计算为 {} tokens",
+            C.openai.model,
+            effective_input_limit,
+            safe_chunk_size,
+        )
+    return safe_chunk_size
+
+
+def _collect_payload_extensions(graph: nx.DiGraph, nodes: list[str]) -> list[str]:
+    extensions = []
+    for node in nodes:
+        path = str(graph.nodes[node].get("path", "") or "")
+        ext = os.path.splitext(path)[1].lower()
+        if ext and ext not in extensions:
+            extensions.append(ext)
+    return sorted(extensions)
+
+
+def _fit_agent_2_payload(graph: nx.DiGraph, center_node: str):
+    max_depth = max(1, C.project.audit_context_depth)
+    max_nodes = max(1, C.project.max_audit_nodes)
+
+    for depth in range(max_depth, 0, -1):
+        for node_limit in range(max_nodes, 0, -1):
+            ordered_nodes = get_local_subgraph_nodes(
+                graph,
+                center_node,
+                max_depth=depth,
+                max_nodes=node_limit,
+            )
+            payload = gen_text_from_local_subgraph(
+                graph,
+                center_node,
+                max_depth=depth,
+                max_nodes=node_limit,
+            )
+            extensions = _collect_payload_extensions(graph, ordered_nodes)
+            prompt = build_agent_2_prompt(extensions)
+            message_tokens = _estimate_message_tokens(prompt, payload)
+            max_input_tokens = get_effective_max_input_tokens()
+            if max_input_tokens is None or message_tokens <= max_input_tokens:
+                return payload, ordered_nodes, message_tokens
+    return None, [], None
 
 
 def calculate_project_hash(root_dir) -> str:
@@ -60,24 +139,18 @@ def build_audit_payloads(graph: nx.DiGraph) -> List[str]:
     payload_candidates = []
     seen_payload_signatures = set()
     seen_context_signatures = set()
+    skipped_oversize_count = 0
 
     for node in graph.nodes:
         node_data = graph.nodes[node]
         if not node_data.get("source_code"):
             continue
 
-        local_nodes = get_local_subgraph_nodes(
-            graph,
-            node,
-            max_depth=C.project.audit_context_depth,
-            max_nodes=C.project.max_audit_nodes,
-        )
-        payload = gen_text_from_local_subgraph(
-            graph,
-            node,
-            max_depth=C.project.audit_context_depth,
-            max_nodes=C.project.max_audit_nodes,
-        )
+        payload, local_nodes, message_tokens = _fit_agent_2_payload(graph, node)
+        if not payload:
+            skipped_oversize_count += 1
+            logger.warning("Agent_2 上下文无法收缩到模型限制内，已跳过节点: {}", node)
+            continue
         payload_signature = hashlib.sha256(payload.encode("utf-8")).hexdigest()
         if payload_signature in seen_payload_signatures:
             continue
@@ -106,15 +179,16 @@ def build_audit_payloads(graph: nx.DiGraph) -> List[str]:
                 len(local_nodes) * 2 +
                 max(1, len(node_data.get("source_code", "").splitlines()))
             ),
-            "tokens": count_text_tokens(payload),
+            "tokens": message_tokens if message_tokens is not None else count_text_tokens(payload),
         })
 
     payload_candidates.sort(key=lambda item: (-item["score"], -item["tokens"]))
     payloads = [item["payload"] for item in payload_candidates]
     logger.info(
-        "Agent_2 任务压缩完成，候选节点:{}，去重后任务数:{}",
+        "Agent_2 任务压缩完成，候选节点:{}，去重后任务数:{}，超限跳过节点数:{}",
         graph.number_of_nodes(),
         len(payloads),
+        skipped_oversize_count,
     )
     return payloads
 
@@ -204,7 +278,7 @@ def run_audit(project_dir: str, output_dir: str, batch_size: int = 10):
     report_path = os.path.join(output_dir, f"{project_hash}_审计结果.log")
 
     if not os.path.exists(graph_path):
-        source_file_list = get_all_source_files_bfs(root_dir, chunk_token_size=C.openai.max_per_tokens)
+        source_file_list = get_all_source_files_bfs(root_dir, chunk_token_size=_resolve_agent_1_chunk_token_size())
         logger.info("调用异步处理 Agent_1...")
         asyncio.run(async_run_agent_1(source_file_list, out_file=graph_path, batch_size=batch_size))
     else:

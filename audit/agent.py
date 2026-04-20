@@ -9,7 +9,12 @@ from config import C
 from models import SourceFile
 from audit.tree_sitter_parser import extract_code_units_with_tree_sitter, supports_tree_sitter
 from prompt import build_agent_1_prompt, build_agent_2_prompt
-from utils import gen_line_code, parse_code_uint
+from utils import (
+    count_message_tokens,
+    gen_line_code,
+    get_effective_max_input_tokens,
+    parse_code_uint,
+)
 
 llm = AsyncOpenAI(
     base_url=C.openai.base_url,
@@ -44,6 +49,17 @@ async def chat_completion_text(text: str, prompt: str):
 
 async def chat_completion_messages(messages) -> str:
     last_error = None
+    max_input_tokens = get_effective_max_input_tokens()
+    current_tokens = count_message_tokens(messages)
+    if max_input_tokens is not None and current_tokens > max_input_tokens:
+        raise RuntimeError(
+            "请求消息过大: 当前约 {} tokens，模型 {} 上限 {} tokens。"
+            "请在 config.yaml 中调小输入内容，或设置更合适的 openai.max_input_tokens。".format(
+                current_tokens,
+                C.openai.model,
+                max_input_tokens,
+            )
+        )
     for attempt in range(1, C.openai.max_retries + 1):
         try:
             async with get_llm_semaphore():
