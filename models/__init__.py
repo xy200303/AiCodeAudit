@@ -37,6 +37,10 @@ class ProjectConfig(BaseModel):
     max_audit_nodes: int = 12
     dependency_tree_max_branches: int = 3
     dependency_context_max_focus_paths: int = 6
+    disable_agent2_candidate_prescreen: bool = False
+    disable_agent2_tree_payload_dedup: bool = False
+    disable_agent2_node_payload_dedup: bool = False
+    disable_agent2_final_payload_dedup: bool = False
     agent2_failure_rate_threshold: float = 0.3
     agent2_candidate_score_threshold: int = 8
 

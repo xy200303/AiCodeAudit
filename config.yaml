@@ -79,4 +79,6 @@ project:
   # Agent_2 风险候选预筛选阈值
   # 值越大，送入 Agent_2 的节点越少，速度更快但可能漏掉边缘风险
   # 值越小，覆盖更广但噪音更多
-  agent2_candidate_score_threshold: 8
+  agent2_candidate_score_threshold: 4
+
+  

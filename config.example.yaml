@@ -148,6 +148,22 @@ project:
   # 一般建议 3~8
   dependency_context_max_focus_paths: 6
 
+  # 是否关闭 Agent_2 风险候选预筛选
+  # 设为 true 后，几乎所有带源码的节点都会进入后续上下文构造，任务数会明显增加
+  disable_agent2_candidate_prescreen: false
+
+  # 是否关闭依赖树任务内部去重
+  # 适合你想尽量保留更多“树任务”，但仍希望节点回退任务保持收敛
+  disable_agent2_tree_payload_dedup: false
+
+  # 是否关闭节点回退任务内部去重
+  # 适合你觉得局部节点上下文压得太狠，但又不想完全放开所有去重
+  disable_agent2_node_payload_dedup: false
+
+  # 是否关闭最终合并阶段去重
+  # 设为 true 后，树任务与节点任务即使内容相似，也会尽量同时保留
+  disable_agent2_final_payload_dedup: false
+
   # Agent_2 失败率保护阈值
   # 当大模型请求失败率高于该比例时，最终结果会被标记为“审计不完整”，避免把网络故障误判为“审计通过”
   # 一般建议 0.2 ~ 0.4
@@ -156,4 +172,4 @@ project:
   # Agent_2 风险候选预筛选阈值
   # 值越大，送入 Agent_2 的节点越少，速度更快但可能漏掉边缘风险
   # 值越小，覆盖更广但噪音更多
-  agent2_candidate_score_threshold: 8
+  agent2_candidate_score_threshold: 4

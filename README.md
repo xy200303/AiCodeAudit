@@ -291,6 +291,10 @@ cursor.execute("SELECT * FROM users WHERE name = '" + username + "'")
 - `max_audit_nodes`：单次审计最大上下文节点数
 - `dependency_tree_max_branches`：统一依赖上下文里，每个节点向上/向下最多保留的高价值分支数
 - `dependency_context_max_focus_paths`：统一依赖上下文里最多保留的重点传播链路数
+- `disable_agent2_candidate_prescreen`：是否关闭 `Agent_2` 风险候选预筛；关闭后任务数会明显增加
+- `disable_agent2_tree_payload_dedup`：是否关闭依赖树任务内部去重
+- `disable_agent2_node_payload_dedup`：是否关闭节点回退任务内部去重
+- `disable_agent2_final_payload_dedup`：是否关闭最终合并阶段去重
 - `agent2_failure_rate_threshold`：`Agent_2` 失败率保护阈值；超过该比例时，结果会被标记为“审计不完整”
 - `agent2_candidate_score_threshold`：`Agent_2` 风险候选预筛阈值；值越大，送入大模型的节点越少，速度更快但可能漏掉边缘风险
 
