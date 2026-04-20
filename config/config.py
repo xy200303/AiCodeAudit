@@ -35,8 +35,10 @@ def create_default_config(file_path):
             "dependency_parse_engine": "auto",
             "audit_context_depth": 2,
             "max_audit_nodes": 12,
+            "dependency_tree_max_branches": 3,
+            "dependency_context_max_focus_paths": 6,
             "agent2_failure_rate_threshold": 0.3,
-            "agent2_candidate_score_threshold": 12,
+            "agent2_candidate_score_threshold": 8,
         }
     }
     with open(file_path, 'w', encoding='utf-8') as file:

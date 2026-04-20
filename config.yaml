@@ -75,3 +75,8 @@ project:
   # 当大模型请求失败率高于该比例时，最终结果会被标记为“审计不完整”，避免把网络故障误判为“审计通过”
   # 一般建议 0.2 ~ 0.4
   agent2_failure_rate_threshold: 0.3
+
+  # Agent_2 风险候选预筛选阈值
+  # 值越大，送入 Agent_2 的节点越少，速度更快但可能漏掉边缘风险
+  # 值越小，覆盖更广但噪音更多
+  agent2_candidate_score_threshold: 8

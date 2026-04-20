@@ -12,7 +12,10 @@ from tqdm import tqdm
 from audit import get_all_source_files_bfs, print_source_dir, scan_project_struct
 from audit.agent import agent_1, agent_2
 from audit.tool import (
+    build_dependency_tree,
+    gen_text_from_dependency_tree,
     gen_text_from_local_subgraph,
+    get_global_ranked_dependency_trees,
     get_local_security_summary,
     get_local_subgraph_nodes,
     get_security_hint_profile,
@@ -95,6 +98,50 @@ def _collect_payload_extensions(graph: nx.DiGraph, nodes: list[str]) -> list[str
         if ext and ext not in extensions:
             extensions.append(ext)
     return sorted(extensions)
+
+
+def _fit_agent_2_tree_payload(graph: nx.DiGraph, tree: dict):
+    payload = gen_text_from_dependency_tree(graph, tree)
+    extensions = _collect_payload_extensions(graph, tree["nodes"])
+    prompt = build_agent_2_prompt(extensions)
+    message_tokens = _estimate_message_tokens(prompt, payload)
+    max_input_tokens = get_effective_max_input_tokens()
+    if max_input_tokens is None or message_tokens <= max_input_tokens:
+        return payload, message_tokens
+    return None, None
+
+
+def _tree_candidate_score(graph: nx.DiGraph, tree: dict) -> int:
+    score = 0
+    branch_bonus = 0
+    input_count = 0
+    sink_count = 0
+    validation_count = 0
+    safety_count = 0
+    for node in tree["nodes"]:
+        node_data = graph.nodes[node]
+        profile = get_security_hint_profile(node_data)
+        input_count += profile["input_count"]
+        sink_count += profile["sink_count"]
+        validation_count += profile["validation_count"]
+        safety_count += profile["safety_count"]
+        score += security_hint_score(node_data) * 5
+        score += graph.in_degree(node) + graph.out_degree(node)
+        score += max(1, len(str(node_data.get("source_code", "")).splitlines()))
+
+    for branch in tree["branches"]:
+        branch_path = branch["path"]
+        branch_bonus += min(120, len(branch_path) * 15)
+        if branch["direction"] == "downstream":
+            branch_bonus += 20
+
+    score += branch_bonus
+    score += input_count * 25 + sink_count * 35 + validation_count * 8 + safety_count * 5
+    if input_count > 0 and sink_count > 0:
+        score += 200
+    if input_count > 0 and sink_count > 0 and validation_count == 0 and safety_count == 0:
+        score += 150
+    return score
 
 
 def _candidate_precheck_score(graph: nx.DiGraph, node: str) -> tuple[int, dict]:
@@ -198,10 +245,38 @@ async def async_run_agent_1(source_file_list: List[SourceFile], out_file, batch_
 
 def build_audit_payloads(graph: nx.DiGraph) -> List[str]:
     payload_candidates = []
+    tree_payload_candidates = []
     seen_payload_signatures = set()
     seen_context_signatures = set()
+    seen_tree_signatures = set()
     skipped_oversize_count = 0
     skipped_prescreen_count = 0
+    prescreened_nodes = []
+
+    ranked_trees = get_global_ranked_dependency_trees(
+        graph,
+        max_depth=max(1, C.project.audit_context_depth),
+        max_nodes=max(1, C.project.max_audit_nodes),
+        max_trees=max(30, C.project.max_audit_nodes * 3),
+    )
+    for tree in ranked_trees:
+        root_data = graph.nodes[tree["root"]]
+        is_candidate, prescreen_score = _is_high_value_audit_candidate(graph, tree["root"])
+        if not is_candidate:
+            continue
+        payload, message_tokens = _fit_agent_2_tree_payload(graph, tree)
+        if not payload:
+            continue
+        payload_signature = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        if payload_signature in seen_tree_signatures:
+            continue
+        seen_tree_signatures.add(payload_signature)
+        tree_payload_candidates.append({
+            "payload": payload,
+            "score": _tree_candidate_score(graph, tree) + prescreen_score,
+            "tokens": message_tokens if message_tokens is not None else count_text_tokens(payload),
+            "root": root_data.get("source_name", tree["root"]),
+        })
 
     for node in graph.nodes:
         node_data = graph.nodes[node]
@@ -209,6 +284,7 @@ def build_audit_payloads(graph: nx.DiGraph) -> List[str]:
             continue
 
         is_candidate, prescreen_score = _is_high_value_audit_candidate(graph, node)
+        prescreened_nodes.append((node, prescreen_score, is_candidate))
         if not is_candidate:
             skipped_prescreen_count += 1
             continue
@@ -250,6 +326,60 @@ def build_audit_payloads(graph: nx.DiGraph) -> List[str]:
             "tokens": message_tokens if message_tokens is not None else count_text_tokens(payload),
         })
 
+    source_nodes = [node for node in graph.nodes if graph.nodes[node].get("source_code")]
+    minimum_candidate_count = min(
+        len(source_nodes),
+        max(10, max(1, len(source_nodes) // 3)),
+    )
+
+    if len(payload_candidates) < minimum_candidate_count:
+        prescreened_nodes.sort(key=lambda item: (-item[1], str(item[0])))
+        logger.warning(
+            "Agent_2 预筛选结果较严格，已自动放宽候选保留数量: current={} minimum={}",
+            len(payload_candidates),
+            minimum_candidate_count,
+        )
+        for node, prescreen_score, already_selected in prescreened_nodes:
+            if len(payload_candidates) >= minimum_candidate_count:
+                break
+            if already_selected:
+                continue
+            node_data = graph.nodes[node]
+            payload, local_nodes, message_tokens = _fit_agent_2_payload(graph, node)
+            if not payload:
+                continue
+            payload_signature = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+            if payload_signature in seen_payload_signatures:
+                continue
+            center_signature = hashlib.sha256(
+                "||".join([
+                    node_data.get("path", ""),
+                    node_data.get("source_name", ""),
+                    node_data.get("target_name", ""),
+                    node_data.get("desc", ""),
+                    node_data.get("source_code", ""),
+                    ",".join(sorted(local_nodes)),
+                ]).encode("utf-8")
+            ).hexdigest()
+            if center_signature in seen_context_signatures:
+                continue
+
+            seen_payload_signatures.add(payload_signature)
+            seen_context_signatures.add(center_signature)
+            payload_candidates.append({
+                "payload": payload,
+                "score": (
+                    security_hint_score(node_data) * 5 +
+                    graph.in_degree(node) +
+                    graph.out_degree(node) +
+                    len(local_nodes) * 2 +
+                    max(1, len(node_data.get("source_code", "").splitlines())) +
+                    prescreen_score
+                ),
+                "tokens": message_tokens if message_tokens is not None else count_text_tokens(payload),
+            })
+
+    tree_payload_candidates.sort(key=lambda item: (-item["score"], -item["tokens"]))
     payload_candidates.sort(key=lambda item: (-item["score"], -item["tokens"]))
     if not payload_candidates:
         logger.warning("Agent_2 预筛选后无候选节点，已回退为全量高分节点模式")
@@ -273,10 +403,22 @@ def build_audit_payloads(graph: nx.DiGraph) -> List[str]:
             })
         payload_candidates.sort(key=lambda item: (-item["score"], -item["tokens"]))
 
-    payloads = [item["payload"] for item in payload_candidates]
+    merged_candidates = tree_payload_candidates + payload_candidates
+    merged_candidates.sort(key=lambda item: (-item["score"], -item["tokens"]))
+
+    payloads = []
+    seen_merged_payloads = set()
+    for item in merged_candidates:
+        signature = hashlib.sha256(item["payload"].encode("utf-8")).hexdigest()
+        if signature in seen_merged_payloads:
+            continue
+        seen_merged_payloads.add(signature)
+        payloads.append(item["payload"])
+
     logger.info(
-        "Agent_2 任务压缩完成，候选节点:{}，预筛选跳过节点数:{}，去重后任务数:{}，超限跳过节点数:{}",
+        "Agent_2 任务压缩完成，候选节点:{}，候选依赖树数:{}，预筛选跳过节点数:{}，去重后任务数:{}，超限跳过节点数:{}",
         graph.number_of_nodes(),
+        len(tree_payload_candidates),
         skipped_prescreen_count,
         len(payloads),
         skipped_oversize_count,

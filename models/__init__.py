@@ -35,8 +35,10 @@ class ProjectConfig(BaseModel):
     dependency_parse_engine: str = "auto"
     audit_context_depth: int = 2
     max_audit_nodes: int = 12
+    dependency_tree_max_branches: int = 3
+    dependency_context_max_focus_paths: int = 6
     agent2_failure_rate_threshold: float = 0.3
-    agent2_candidate_score_threshold: int = 12
+    agent2_candidate_score_threshold: int = 8
 
 class Config(BaseModel):
     openai: OpenAIConfig

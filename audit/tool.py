@@ -2,6 +2,8 @@ from collections import deque
 import os
 import re
 
+from config import C
+
 
 COMMON_SECURITY_HINT_PATTERNS = {
     "input_sources": [
@@ -423,14 +425,22 @@ def get_ranked_audit_paths(graph, center_node, max_depth=2, max_paths=6):
         for outbound in outbound_paths[:max_paths]:
             chain_candidates.append(("贯通调用链", inbound + outbound[1:]))
 
-    deduped_candidates = []
-    seen = set()
+    deduped_candidates_map = {}
     for chain_type, path in chain_candidates:
         signature = tuple(path)
-        if signature in seen:
+        existing = deduped_candidates_map.get(signature)
+        current_priority = (
+            _path_priority(graph, path),
+            chain_type == "贯通调用链",
+            chain_type == "下游危险链",
+        )
+        if existing is None:
+            deduped_candidates_map[signature] = (chain_type, path, current_priority)
             continue
-        seen.add(signature)
-        deduped_candidates.append((chain_type, path))
+        if current_priority > existing[2]:
+            deduped_candidates_map[signature] = (chain_type, path, current_priority)
+
+    deduped_candidates = [(chain_type, path) for chain_type, path, _ in deduped_candidates_map.values()]
 
     deduped_candidates.sort(
         key=lambda item: (
@@ -440,6 +450,150 @@ def get_ranked_audit_paths(graph, center_node, max_depth=2, max_paths=6):
         )
     )
     return deduped_candidates[:max_paths]
+
+
+def _build_dependency_branches(graph, root_node, max_depth=2, max_nodes=12, max_branches=3, direction="upstream"):
+    visited = {root_node}
+    ordered_nodes = []
+    edges = []
+    branches = []
+    queue = deque([(root_node, [root_node], 0)])
+
+    while queue and len(visited) < max_nodes:
+        current, path, depth = queue.popleft()
+        if depth >= max_depth:
+            normalized_path = list(reversed(path)) if direction == "upstream" else list(path)
+            branches.append({"direction": direction, "path": normalized_path})
+            continue
+
+        neighbors = (
+            list(graph.predecessors(current))
+            if direction == "upstream"
+            else list(graph.successors(current))
+        )
+        neighbors.sort(key=lambda node: (-_node_priority(graph, node), str(node)))
+        selected_neighbors = neighbors[:max_branches]
+        if not selected_neighbors:
+            normalized_path = list(reversed(path)) if direction == "upstream" else list(path)
+            branches.append({"direction": direction, "path": normalized_path})
+            continue
+
+        for neighbor in selected_neighbors:
+            edges.append((neighbor, current) if direction == "upstream" else (current, neighbor))
+            next_path = path + [neighbor]
+            if neighbor not in visited and len(visited) < max_nodes:
+                visited.add(neighbor)
+                ordered_nodes.append(neighbor)
+                queue.append((neighbor, next_path, depth + 1))
+            else:
+                normalized_path = list(reversed(next_path)) if direction == "upstream" else list(next_path)
+                branches.append({"direction": direction, "path": normalized_path})
+
+    if not branches:
+        branches.append({"direction": direction, "path": [root_node]})
+
+    unique_branches = []
+    seen = set()
+    for branch in branches:
+        signature = (branch["direction"], tuple(branch["path"]))
+        if signature in seen:
+            continue
+        seen.add(signature)
+        unique_branches.append(branch)
+
+    unique_branches.sort(
+        key=lambda branch: (-_path_priority(graph, branch["path"]), -len(branch["path"]), str(branch["path"]))
+    )
+    return {
+        "nodes": ordered_nodes,
+        "edges": edges,
+        "branches": unique_branches,
+    }
+
+
+def build_dependency_tree(graph, root_node, max_depth=2, max_nodes=12, max_branches=3):
+    upstream_budget = max(2, max_nodes // 2)
+    downstream_budget = max(2, max_nodes - upstream_budget)
+
+    upstream = _build_dependency_branches(
+        graph,
+        root_node,
+        max_depth=max_depth,
+        max_nodes=upstream_budget,
+        max_branches=max_branches,
+        direction="upstream",
+    )
+    downstream = _build_dependency_branches(
+        graph,
+        root_node,
+        max_depth=max_depth,
+        max_nodes=downstream_budget,
+        max_branches=max_branches,
+        direction="downstream",
+    )
+
+    ordered_nodes = [root_node]
+    for node in upstream["nodes"] + downstream["nodes"]:
+        if node not in ordered_nodes and len(ordered_nodes) < max_nodes:
+            ordered_nodes.append(node)
+
+    branch_candidates = upstream["branches"] + downstream["branches"]
+    branch_candidates.sort(
+        key=lambda branch: (
+            -_path_priority(graph, branch["path"]),
+            branch["direction"] != "upstream",
+            -len(branch["path"]),
+            str(branch["path"]),
+        )
+    )
+
+    return {
+        "root": root_node,
+        "nodes": ordered_nodes,
+        "edges": upstream["edges"] + downstream["edges"],
+        "branches": branch_candidates,
+        "upstream_branches": upstream["branches"],
+        "downstream_branches": downstream["branches"],
+    }
+
+
+def get_global_ranked_dependency_trees(graph, max_depth=2, max_nodes=12, max_trees=60):
+    tree_candidates = []
+    for node in graph.nodes:
+        node_data = graph.nodes[node]
+        if not node_data.get("source_code"):
+            continue
+        tree = build_dependency_tree(
+            graph,
+            node,
+            max_depth=max_depth,
+            max_nodes=max_nodes,
+            max_branches=max(1, getattr(C.project, "dependency_tree_max_branches", 3)),
+        )
+        tree_candidates.append(tree)
+
+    deduped_trees = []
+    seen = set()
+    for tree in tree_candidates:
+        signature = (
+            tree["root"],
+            tuple(tree["nodes"]),
+            tuple(tuple(edge) for edge in tree["edges"]),
+        )
+        if signature in seen:
+            continue
+        seen.add(signature)
+        deduped_trees.append(tree)
+
+    deduped_trees.sort(
+        key=lambda tree: (
+            -sum(_node_priority(graph, node) for node in tree["nodes"]),
+            -len(tree["branches"]),
+            -len(tree["nodes"]),
+            str(tree["root"]),
+        )
+    )
+    return deduped_trees[:max_trees]
 
 
 def _format_path_chain(index, graph, chain_type, path):
@@ -468,8 +622,70 @@ def gen_text_from_path(graph, path):
     return "\n".join(text_list)
 
 
+def _format_dependency_tree_summary(graph, tree, ranked_paths=None):
+    root_data = graph.nodes[tree["root"]]
+    profile = get_security_hint_profile(root_data)
+    lines = [
+        "<依赖上下文摘要>",
+        f"根节点:{root_data.get('source_name') or root_data.get('target_name') or tree['root']}",
+        f"根路径:{root_data.get('path', '')}",
+        f"树节点数:{len(tree['nodes'])}",
+        f"树边数:{len(tree['edges'])}",
+        f"分支数:{len(tree['branches'])}",
+        f"上游分支数:{len(tree.get('upstream_branches', []))}",
+        f"下游分支数:{len(tree.get('downstream_branches', []))}",
+        f"根节点输入源数量:{profile['input_count']}",
+        f"根节点危险点数量:{profile['sink_count']}",
+        f"根节点校验信号数量:{profile['validation_count']}",
+        f"根节点安全信号数量:{profile['safety_count']}",
+    ]
+    for index, branch in enumerate(tree["branches"][:8]):
+        branch_path = branch["path"]
+        branch_direction = "上游分支" if branch["direction"] == "upstream" else "下游分支"
+        branch_names = []
+        for node in branch_path:
+            node_data = graph.nodes[node]
+            branch_names.append(str(node_data.get("source_name") or node_data.get("target_name") or node))
+        lines.append(f"{branch_direction}_{index}:{' -> '.join(branch_names)}")
+    if ranked_paths:
+        lines.append(f"重点链路数:{len(ranked_paths)}")
+        for index, (chain_type, path) in enumerate(ranked_paths):
+            names = []
+            for node in path:
+                node_data = graph.nodes[node]
+                names.append(str(node_data.get("source_name") or node_data.get("target_name") or node))
+            hint_summary = _path_hint_summary(graph, path)
+            lines.extend([
+                f"<重点链路_{index}>",
+                f"链路类型:{chain_type}",
+                f"路径:{' -> '.join(names)}",
+                f"输入源数量:{hint_summary['input_sources']}",
+                f"危险点数量:{hint_summary['dangerous_sinks']}",
+                f"校验信号数量:{hint_summary['validation_signals']}",
+                f"安全信号数量:{hint_summary['safety_signals']}",
+                f"<重点链路_{index}>",
+            ])
+    lines.append("<依赖上下文摘要>")
+    return "\n".join(lines)
+
+
+def gen_text_from_dependency_tree(graph, tree):
+    max_focus_paths = max(1, getattr(C.project, "dependency_context_max_focus_paths", 6))
+    ranked_paths = get_ranked_audit_paths(
+        graph,
+        tree["root"],
+        max_depth=max(2, len(tree.get("branches", []))),
+        max_paths=min(max_focus_paths, max(3, len(tree.get("branches", [])))),
+    )
+    text_list = [_format_dependency_tree_summary(graph, tree, ranked_paths=ranked_paths)]
+    for index, node in enumerate(tree["nodes"]):
+        text_list.append(_format_node(index, graph.nodes[node]))
+    return "\n".join(text_list)
+
+
 def get_local_subgraph_nodes(graph, center_node, max_depth=2, max_nodes=12):
-    ranked_paths = get_ranked_audit_paths(graph, center_node, max_depth=max_depth, max_paths=max_nodes)
+    focus_path_limit = min(max_nodes, max(1, getattr(C.project, "dependency_context_max_focus_paths", 6)))
+    ranked_paths = get_ranked_audit_paths(graph, center_node, max_depth=max_depth, max_paths=focus_path_limit)
     visited = set()
     ordered_nodes = []
 
@@ -506,7 +722,8 @@ def get_local_subgraph_nodes(graph, center_node, max_depth=2, max_nodes=12):
 
 
 def gen_text_from_local_subgraph(graph, center_node, max_depth=2, max_nodes=12):
-    ranked_paths = get_ranked_audit_paths(graph, center_node, max_depth=max_depth, max_paths=max_nodes)
+    focus_path_limit = min(max_nodes, max(1, getattr(C.project, "dependency_context_max_focus_paths", 6)))
+    ranked_paths = get_ranked_audit_paths(graph, center_node, max_depth=max_depth, max_paths=focus_path_limit)
     ordered_nodes = get_local_subgraph_nodes(
         graph,
         center_node,
@@ -515,10 +732,10 @@ def gen_text_from_local_subgraph(graph, center_node, max_depth=2, max_nodes=12):
     )
     text_list = []
     if ranked_paths:
-        text_list.append("<调用链摘要>")
+        text_list.append("<依赖上下文摘要>")
         for index, (chain_type, path) in enumerate(ranked_paths):
             text_list.append(_format_path_chain(index, graph, chain_type, path))
-        text_list.append("<调用链摘要>")
+        text_list.append("<依赖上下文摘要>")
     for index, node in enumerate(ordered_nodes):
         text_list.append(_format_node(index, graph.nodes[node]))
     return "\n".join(text_list)
