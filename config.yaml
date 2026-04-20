@@ -1,8 +1,8 @@
 openai:
-  api_key: xxxxxx
-  base_url: xxxxxxxxx
+  api_key: 111111
+  base_url: https://api.openai-proxy.org/v1
   max_input_tokens: 40000
-  model: deepseek-ai/DeepSeek-V3.2
+  model: gpt-5.4
   timeout_seconds: 60
   max_retries: 3
   retry_backoff_seconds: 2
@@ -68,5 +68,10 @@ project:
   - .c
   - .cs
   - .h
-  audit_context_depth: 3
-  max_audit_nodes: 20
+  audit_context_depth: 10
+  max_audit_nodes: 40
+
+  # Agent_2 失败率保护阈值
+  # 当大模型请求失败率高于该比例时，最终结果会被标记为“审计不完整”，避免把网络故障误判为“审计通过”
+  # 一般建议 0.2 ~ 0.4
+  agent2_failure_rate_threshold: 0.3

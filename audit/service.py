@@ -11,7 +11,13 @@ from tqdm import tqdm
 
 from audit import get_all_source_files_bfs, print_source_dir, scan_project_struct
 from audit.agent import agent_1, agent_2
-from audit.tool import gen_text_from_local_subgraph, get_local_subgraph_nodes, security_hint_score
+from audit.tool import (
+    gen_text_from_local_subgraph,
+    get_local_security_summary,
+    get_local_subgraph_nodes,
+    get_security_hint_profile,
+    security_hint_score,
+)
 from config import C
 from models import SourceFile
 from prompt import build_agent_1_prompt, build_agent_2_prompt
@@ -62,6 +68,25 @@ def _resolve_agent_1_chunk_token_size() -> int:
     return safe_chunk_size
 
 
+def _build_incomplete_audit_report(total_tasks: int, failed_tasks: int, threshold: float) -> str:
+    failure_rate = (failed_tasks / total_tasks) if total_tasks else 0.0
+    return (
+        "<审计报告>\n"
+        "<结论>审计不完整</结论>\n"
+        "<统计>\n"
+        f"总任务数: {total_tasks}\n"
+        f"失败任务数: {failed_tasks}\n"
+        f"失败率: {failure_rate:.2%}\n"
+        f"阈值: {threshold:.2%}\n"
+        "</统计>\n"
+        "<说明>\n"
+        "本次 Agent_2 审计阶段存在较高比例的大模型请求失败，当前结果不应视为“审计通过”。\n"
+        "建议检查网络连通性、代理服务稳定性或降低并发后重新执行审计。\n"
+        "</说明>\n"
+        "</审计报告>"
+    )
+
+
 def _collect_payload_extensions(graph: nx.DiGraph, nodes: list[str]) -> list[str]:
     extensions = []
     for node in nodes:
@@ -70,6 +95,42 @@ def _collect_payload_extensions(graph: nx.DiGraph, nodes: list[str]) -> list[str
         if ext and ext not in extensions:
             extensions.append(ext)
     return sorted(extensions)
+
+
+def _candidate_precheck_score(graph: nx.DiGraph, node: str) -> tuple[int, dict]:
+    node_data = graph.nodes[node]
+    profile = get_security_hint_profile(node_data)
+    local_summary = get_local_security_summary(
+        graph,
+        node,
+        max_depth=max(1, C.project.audit_context_depth),
+        max_nodes=max(1, C.project.max_audit_nodes),
+    )
+    score = (
+        profile["input_count"] * 8
+        + profile["sink_count"] * 10
+        + profile["validation_count"] * 3
+        + profile["safety_count"] * 2
+        + local_summary["input_nodes"] * 4
+        + local_summary["sink_nodes"] * 5
+        + local_summary["combined_risk_nodes"] * 12
+        + min(6, graph.in_degree(node) + graph.out_degree(node))
+    )
+    return score, {"profile": profile, "local_summary": local_summary}
+
+
+def _is_high_value_audit_candidate(graph: nx.DiGraph, node: str) -> tuple[bool, int]:
+    score, context = _candidate_precheck_score(graph, node)
+    profile = context["profile"]
+    local_summary = context["local_summary"]
+    threshold = max(1, getattr(C.project, "agent2_candidate_score_threshold", 12))
+
+    has_direct_signal = profile["has_input"] or profile["has_sink"] or profile["has_validation"] or profile["has_safety"]
+    has_local_risk_chain = (
+        local_summary["combined_risk_nodes"] > 0
+        or (local_summary["input_nodes"] > 0 and local_summary["sink_nodes"] > 0)
+    )
+    return has_direct_signal or has_local_risk_chain or score >= threshold, score
 
 
 def _fit_agent_2_payload(graph: nx.DiGraph, center_node: str):
@@ -140,10 +201,16 @@ def build_audit_payloads(graph: nx.DiGraph) -> List[str]:
     seen_payload_signatures = set()
     seen_context_signatures = set()
     skipped_oversize_count = 0
+    skipped_prescreen_count = 0
 
     for node in graph.nodes:
         node_data = graph.nodes[node]
         if not node_data.get("source_code"):
+            continue
+
+        is_candidate, prescreen_score = _is_high_value_audit_candidate(graph, node)
+        if not is_candidate:
+            skipped_prescreen_count += 1
             continue
 
         payload, local_nodes, message_tokens = _fit_agent_2_payload(graph, node)
@@ -177,16 +244,40 @@ def build_audit_payloads(graph: nx.DiGraph) -> List[str]:
                 graph.in_degree(node) +
                 graph.out_degree(node) +
                 len(local_nodes) * 2 +
-                max(1, len(node_data.get("source_code", "").splitlines()))
+                max(1, len(node_data.get("source_code", "").splitlines())) +
+                prescreen_score
             ),
             "tokens": message_tokens if message_tokens is not None else count_text_tokens(payload),
         })
 
     payload_candidates.sort(key=lambda item: (-item["score"], -item["tokens"]))
+    if not payload_candidates:
+        logger.warning("Agent_2 预筛选后无候选节点，已回退为全量高分节点模式")
+        for node in graph.nodes:
+            node_data = graph.nodes[node]
+            if not node_data.get("source_code"):
+                continue
+            payload, local_nodes, message_tokens = _fit_agent_2_payload(graph, node)
+            if not payload:
+                continue
+            payload_candidates.append({
+                "payload": payload,
+                "score": (
+                    security_hint_score(node_data) * 5
+                    + graph.in_degree(node)
+                    + graph.out_degree(node)
+                    + len(local_nodes) * 2
+                    + max(1, len(node_data.get("source_code", "").splitlines()))
+                ),
+                "tokens": message_tokens if message_tokens is not None else count_text_tokens(payload),
+            })
+        payload_candidates.sort(key=lambda item: (-item["score"], -item["tokens"]))
+
     payloads = [item["payload"] for item in payload_candidates]
     logger.info(
-        "Agent_2 任务压缩完成，候选节点:{}，去重后任务数:{}，超限跳过节点数:{}",
+        "Agent_2 任务压缩完成，候选节点:{}，预筛选跳过节点数:{}，去重后任务数:{}，超限跳过节点数:{}",
         graph.number_of_nodes(),
+        skipped_prescreen_count,
         len(payloads),
         skipped_oversize_count,
     )
@@ -230,6 +321,8 @@ async def async_run_agent_2(graph: nx.DiGraph, out_file, batch_size=10):
     reports = []
     failed_count = 0
     filtered_pass_count = 0
+    total_tasks = len(payloads)
+    failure_rate_threshold = max(0.0, min(1.0, getattr(C.project, "agent2_failure_rate_threshold", 0.3)))
 
     for batch in tqdm(batches, total=len(batches), desc="Agent_2 执行中..."):
         tasks = [asyncio.create_task(agent_2(payload)) for payload in batch]
@@ -253,13 +346,30 @@ async def async_run_agent_2(graph: nx.DiGraph, out_file, batch_size=10):
             else "<审计报告>\n<结论>审计通过</结论>\n</审计报告>",
         )
 
-    if not reports and not os.path.exists(out_file):
+    failure_rate = (failed_count / total_tasks) if total_tasks else 0.0
+    is_incomplete = failed_count > 0 and failure_rate >= failure_rate_threshold
+
+    if is_incomplete:
+        incomplete_report = _build_incomplete_audit_report(total_tasks, failed_count, failure_rate_threshold)
+        final_report = incomplete_report
+        if reports:
+            final_report += "\n--------------------------------\n" + "\n--------------------------------\n".join(reports)
+        write_file(out_file, final_report)
+        logger.warning(
+            "Agent_2 失败率过高，结果已标记为审计不完整: total_tasks={} failed_tasks={} failure_rate={:.2%} threshold={:.2%}",
+            total_tasks,
+            failed_count,
+            failure_rate,
+            failure_rate_threshold,
+        )
+    elif not reports and not os.path.exists(out_file):
         write_file(out_file, "<审计报告>\n<结论>审计通过</结论>\n</审计报告>")
 
     logger.info(
-        "Agent_2 计算完毕，输出文件:{}，失败任务数:{}，过滤通过结果数:{}，保留风险结果数:{}",
+        "Agent_2 计算完毕，输出文件:{}，失败任务数:{}，失败率:{:.2%}，过滤通过结果数:{}，保留风险结果数:{}",
         out_file,
         failed_count,
+        failure_rate,
         filtered_pass_count,
         len(reports),
     )

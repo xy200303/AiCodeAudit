@@ -4,10 +4,11 @@ import os
 import re
 from dataclasses import dataclass
 
+from audit.chunker import split_source_file_semantic
 from loguru import logger
 
 from models import CodeUnit, SourceFile
-from utils import get_code_by_line
+from utils import count_text_tokens, get_code_by_line
 
 try:
     from tree_sitter import Node  # type: ignore
@@ -448,6 +449,51 @@ def _build_code_units_from_visitor(source_file: SourceFile, visitor: GenericTree
     return code_units or None
 
 
+def _build_tree_from_source(source_file: SourceFile, language: str):
+    try:
+        parser = get_parser(language)
+        return parser.parse(source_file.source_code.encode("utf-8"))
+    except Exception as exc:  # pragma: no cover - optional dependency runtime
+        logger.warning("Tree-sitter 解析失败，回退其他方案: {} | {} | {}", language, source_file.path, exc)
+        return None
+
+
+def _fallback_tree_sitter_by_semantic_chunks(source_file: SourceFile, language: str) -> list[CodeUnit] | None:
+    total_tokens = max(1, count_text_tokens(source_file.source_code))
+    chunk_token_size = min(12000, max(2000, total_tokens // 2))
+    fallback_chunks = split_source_file_semantic(source_file, chunk_token_size, isolate_boundaries=True)
+
+    logger.warning(
+        "Tree-sitter 整文件解析失败，尝试按较大语义块回退: {} | chunks={}",
+        source_file.path,
+        len(fallback_chunks),
+    )
+
+    all_code_units: list[CodeUnit] = []
+    successful_chunks = 0
+    for chunk in fallback_chunks:
+        tree = _build_tree_from_source(chunk, language)
+        if tree is None or tree.root_node is None or tree.root_node.has_error:
+            continue
+        visitor = GenericTreeSitterDependencyVisitor(chunk)
+        visitor.walk(tree.root_node)
+        chunk_units = _build_code_units_from_visitor(chunk, visitor)
+        if chunk_units:
+            all_code_units.extend(chunk_units)
+            successful_chunks += 1
+
+    if successful_chunks == 0:
+        return None
+
+    logger.warning(
+        "Tree-sitter 语义块回退成功: {} | success_chunks={} | total_code_units={}",
+        source_file.path,
+        successful_chunks,
+        len(all_code_units),
+    )
+    return all_code_units or None
+
+
 def extract_code_units_with_tree_sitter(source_file: SourceFile) -> list[CodeUnit] | None:
     if not supports_tree_sitter(source_file.extension):
         return None
@@ -456,16 +502,13 @@ def extract_code_units_with_tree_sitter(source_file: SourceFile) -> list[CodeUni
     if language is None:
         return None
 
-    try:
-        parser = get_parser(language)
-        tree = parser.parse(source_file.source_code.encode("utf-8"))
-    except Exception as exc:  # pragma: no cover - optional dependency runtime
-        logger.warning("Tree-sitter 解析失败，回退其他方案: {} | {} | {}", language, source_file.path, exc)
+    tree = _build_tree_from_source(source_file, language)
+    if tree is None:
         return None
 
     if tree.root_node is None or tree.root_node.has_error:
-        logger.warning("Tree-sitter 发现语法错误，回退其他方案: {}", source_file.path)
-        return None
+        logger.warning("Tree-sitter 发现语法错误，尝试语义块回退: {}", source_file.path)
+        return _fallback_tree_sitter_by_semantic_chunks(source_file, language)
 
     visitor = GenericTreeSitterDependencyVisitor(source_file)
     visitor.walk(tree.root_node)

@@ -23,6 +23,7 @@
 - 新增请求体本地 token 预检，超过模型输入上限时会在本地直接报错，避免频繁触发上游 `tokens_limit_reached`
 - 增强小上下文模型兼容性，`Agent_1` 会自动收缩源码分片预算，`Agent_2` 会在超限时自动缩小局部子图上下文
 - 优化非 OpenAI 官方模型的 tokenizer 兼容逻辑，`qwen`、`deepseek` 等模型会自动回退到兼容编码并缓存结果，减少重复告警
+- 新增 `Agent_2` 失败率保护：当大模型请求失败比例过高时，结果会标记为“审计不完整”，避免把网络故障误判为“审计通过”
 - 新增 Streamlit Web 服务，支持上传项目 `zip` 压缩包后直接执行分析
 - 侧边栏升级为 `分析`、`结果可视化`、`依赖可视化` 三个功能页，便于分步骤查看结果
 - 修复审计日志文件缺失时的读取报错，增强结果页容错能力
@@ -67,7 +68,10 @@ AiCodeAudit/
 │  └─ __init__.py
 ├─ image/                         # README / Web 展示图片资源
 ├─ output/                        # 审计输出目录
-│  └─ streamlit_runs/             # Web 模式运行结果
+│  └─ streamlit_runs/             # Web 模式工作目录
+│     ├─ uploads/                # 上传的 zip 包
+│     ├─ extracted/              # 解压后的项目目录
+│     └─ results/                # 审计结果目录（项目名_时间戳）
 ├─ 演示项目/                      # 本地演示样例项目
 ├─ app.py                         # Streamlit Web 服务入口
 ├─ main.py                        # 命令行入口
@@ -182,8 +186,15 @@ streamlit run app.py
 如果使用 Web 模式，结果默认输出到：
 
 ```text
-output/streamlit_runs/
+output/streamlit_runs/results/
 ```
+
+Web 模式下的目录组织如下：
+
+- `output/streamlit_runs/uploads/`：上传的压缩包
+- `output/streamlit_runs/extracted/`：解压后的项目目录
+- `output/streamlit_runs/results/`：审计结果目录
+- 每次结果目录会按 `项目名_时间戳` 命名，例如 `LRSRC-main_20260420_174200`
 
 ## 审计报告格式
 
@@ -223,6 +234,23 @@ cursor.execute("SELECT * FROM users WHERE name = '" + username + "'")
 </审计报告>
 ```
 
+如果 `Agent_2` 阶段因网络或代理问题出现较高比例请求失败，输出会改为：
+
+```text
+<审计报告>
+<结论>审计不完整</结论>
+<统计>
+总任务数: 100
+失败任务数: 45
+失败率: 45.00%
+阈值: 30.00%
+</统计>
+<说明>
+本次 Agent_2 审计阶段存在较高比例的大模型请求失败，当前结果不应视为“审计通过”。
+</说明>
+</审计报告>
+```
+
 ## 配置说明
 
 `config.yaml` 中主要包含两类配置：
@@ -256,6 +284,7 @@ cursor.execute("SELECT * FROM users WHERE name = '" + username + "'")
 - `dependency_parse_engine`：依赖解析引擎，可选 `auto`、`ast`、`llm`
 - `audit_context_depth`：局部审计子图深度
 - `max_audit_nodes`：单次审计最大上下文节点数
+- `agent2_failure_rate_threshold`：`Agent_2` 失败率保护阈值；超过该比例时，结果会被标记为“审计不完整”
 
 `dependency_parse_engine` 说明：
 

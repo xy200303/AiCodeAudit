@@ -1,9 +1,12 @@
 import os
 from collections import deque
 
+from audit.chunker import split_source_file_semantic
+from loguru import logger
+
+from audit.tree_sitter_parser import supports_tree_sitter
 from config import C
 from models import SourceDir, SourceFile
-from utils import get_encoding
 
 
 def scan_project_struct(project_dir):
@@ -65,12 +68,26 @@ def is_excluded_dir(dir_path):
 
 
 def read_source_file(file_path):
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return f.read()
-    except Exception as e:
-        print(f"Failed to read file {file_path}: {e}")
-        return None
+    encodings = ("utf-8", "utf-8-sig", "gb18030", "latin-1")
+    for encoding in encodings:
+        try:
+            with open(file_path, 'r', encoding=encoding) as f:
+                return f.read()
+        except UnicodeDecodeError:
+            continue
+        except Exception as e:
+            logger.warning("读取文件失败: {} | {}", file_path, e)
+            return None
+
+    logger.warning("文件编码无法识别，已跳过: {}", file_path)
+    return None
+
+
+def _should_keep_whole_file(file: SourceFile) -> bool:
+    parse_engine = getattr(C.project, "dependency_parse_engine", "auto").lower()
+    if parse_engine == "llm":
+        return False
+    return supports_tree_sitter(file.extension)
 
 
 def build_tree_string(dir_obj, last=False, tree=None):
@@ -120,45 +137,13 @@ def get_all_source_files_bfs(root_dir, chunk_token_size):
     """
     使用广度优先搜索获取 SourceDir 对象中的所有 SourceFile，并按 token 分块。
     """
-    encoding = get_encoding()
-
     def split_large_files(files):
         new_files = []
         for file in files:
-            lines = file.source_code.splitlines()
-            if not lines:
+            if _should_keep_whole_file(file):
                 new_files.append(file)
                 continue
-
-            current_chunk = []
-            current_tokens = 0
-            chunk_start_line = 1
-
-            for line_number, line in enumerate(lines, start=1):
-                line_tokens = len(encoding.encode(line + "\n"))
-                if current_chunk and current_tokens + line_tokens > chunk_token_size:
-                    new_files.append(SourceFile(
-                        path=file.path,
-                        name=file.name,
-                        source_code="\n".join(current_chunk),
-                        extension=file.extension,
-                        start_line=chunk_start_line,
-                    ))
-                    current_chunk = []
-                    current_tokens = 0
-                    chunk_start_line = line_number
-
-                current_chunk.append(line)
-                current_tokens += line_tokens
-
-            if current_chunk:
-                new_files.append(SourceFile(
-                    path=file.path,
-                    name=file.name,
-                    source_code="\n".join(current_chunk),
-                    extension=file.extension,
-                    start_line=chunk_start_line,
-                ))
+            new_files.extend(split_source_file_semantic(file, chunk_token_size))
         return new_files
 
     queue = deque([root_dir])

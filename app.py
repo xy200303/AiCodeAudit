@@ -334,15 +334,33 @@ def ensure_workspace() -> Path:
     return workspace
 
 
-def save_uploaded_zip(uploaded_file, workspace: Path) -> Path:
-    target = workspace / uploaded_file.name
+def ensure_streamlit_subdirs(workspace: Path) -> dict[str, Path]:
+    subdirs = {
+        "uploads": workspace / "uploads",
+        "extracted": workspace / "extracted",
+        "results": workspace / "results",
+    }
+    for path in subdirs.values():
+        path.mkdir(parents=True, exist_ok=True)
+    return subdirs
+
+
+def sanitize_name(name: str) -> str:
+    normalized = re.sub(r"[^\w.-]+", "_", name.strip(), flags=re.UNICODE).strip("._")
+    return normalized or "project"
+
+
+def save_uploaded_zip(uploaded_file, upload_dir: Path) -> Path:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_name = sanitize_name(Path(uploaded_file.name).stem)
+    target = upload_dir / f"{safe_name}_{timestamp}.zip"
     with target.open("wb") as f:
         f.write(uploaded_file.getbuffer())
     return target
 
 
-def extract_zip(zip_path: Path, workspace: Path):
-    extract_dir = workspace / f"{zip_path.stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+def extract_zip(zip_path: Path, extract_root: Path):
+    extract_dir = extract_root / zip_path.stem
     extract_dir.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path, "r") as zip_ref:
         zip_ref.extractall(extract_dir)
@@ -359,8 +377,14 @@ def read_text_file(file_path: str) -> str:
 
 
 def discover_results(workspace: Path):
+    results_root = workspace / "results"
+    if not results_root.exists():
+        return []
+
     results = []
-    for result_dir in sorted(workspace.glob("*_result"), key=lambda path: path.stat().st_mtime, reverse=True):
+    for result_dir in sorted(results_root.iterdir(), key=lambda path: path.stat().st_mtime, reverse=True):
+        if not result_dir.is_dir():
+            continue
         graph_files = sorted(result_dir.glob("*.graphml"))
         report_files = sorted(result_dir.glob("*_审计结果.log"))
         if not graph_files:
@@ -396,6 +420,11 @@ def parse_report(report_text: str):
 def is_pass_finding(finding: dict) -> bool:
     finding_type = (finding.get("type") or "").strip()
     return finding_type in {"审计通过", "结构化审计通过结果", "审核通过"}
+
+
+def is_incomplete_finding(finding: dict) -> bool:
+    finding_type = (finding.get("type") or "").strip()
+    return finding_type == "审计不完整"
 
 
 def format_finding_title(vuln_type: str, verdict: str, level: str) -> str:
@@ -476,6 +505,22 @@ def parse_structured_report_section(section: str):
                 "vector": "",
                 "impact": "",
                 "fix": "",
+            }],
+            "raw": section,
+        }]
+
+    if "<结论>审计不完整</结论>" in section:
+        summary = extract_tag_content(section, "统计")
+        explanation = extract_tag_content(section, "说明")
+        return [{
+            "file_path": "当前审计任务",
+            "findings": [{
+                "type": "审计不完整",
+                "location": "-",
+                "feature": summary or "Agent_2 失败率过高，当前结果不应视为审计通过",
+                "vector": explanation,
+                "impact": "当前审计结果可能遗漏真实风险，请优先修复网络或代理问题后重试。",
+                "fix": "建议降低并发、检查代理稳定性，并重新执行审计。",
             }],
             "raw": section,
         }]
@@ -698,13 +743,14 @@ def build_edge_dataframe(graph: nx.DiGraph):
 
 
 def render_analysis_page(workspace: Path):
+    subdirs = ensure_streamlit_subdirs(workspace)
     render_page_hero(
         "项目分析工作台",
         "上传项目压缩包后，系统会自动完成源码扫描、依赖图构建与安全审计，并把结构化结果整理到可视化页面中。",
         "Analysis Studio",
     )
     render_stat_strip([
-        ("工作目录", str(workspace)),
+        ("结果目录", str(subdirs["results"])),
         ("每批任务数", str(st.session_state.batch_size)),
         ("文件保留策略", "保留" if st.session_state.keep_files else "分析后清理"),
     ])
@@ -716,15 +762,16 @@ def render_analysis_page(workspace: Path):
         return
 
     if st.button("开始分析", type="primary", use_container_width=True):
-        zip_path = save_uploaded_zip(uploaded_file, workspace)
+        zip_path = save_uploaded_zip(uploaded_file, subdirs["uploads"])
 
         try:
             with st.status("正在解压并分析项目...", expanded=True) as status:
                 st.write("保存上传文件")
-                run_root, project_dir = extract_zip(zip_path, workspace)
+                run_root, project_dir = extract_zip(zip_path, subdirs["extracted"])
                 st.write(f"解压完成: `{project_dir}`")
 
-                output_dir = workspace / f"{project_dir.name}_result"
+                batch_name = f"{sanitize_name(project_dir.name)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                output_dir = subdirs["results"] / batch_name
                 st.write("开始执行 AI 审计")
                 result = run_audit(str(project_dir), str(output_dir), batch_size=st.session_state.batch_size)
                 st.session_state.latest_result = result
@@ -809,6 +856,9 @@ def render_result_list_page(workspace: Path):
             if not show_passed and is_pass_finding(finding):
                 continue
             if is_pass_finding(finding):
+                filtered_findings.append(finding)
+                continue
+            if is_incomplete_finding(finding):
                 filtered_findings.append(finding)
                 continue
             if get_finding_level_label(finding["type"]) in selected_levels:
