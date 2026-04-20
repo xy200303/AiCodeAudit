@@ -1,5 +1,5 @@
 openai:
-  api_key: 111111
+  api_key: sk-T1AJGx0wmAnamxw55EJ3I5PGULhM3zAgGJT2xf4GWzcH6EwH
   base_url: https://api.openai-proxy.org/v1
   max_input_tokens: 40000
   model: gpt-5.4
