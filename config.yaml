@@ -81,4 +81,35 @@ project:
   # 值越小，覆盖更广但噪音更多
   agent2_candidate_score_threshold: 4
 
-  
+  # 统一依赖上下文中，每个节点向上/向下扩展时最多保留多少条高价值分支
+  # 值越大，依赖树覆盖更全，但上下文更长、噪音更多
+  # 一般建议 2~5
+  dependency_tree_max_branches: 3
+
+  # 统一依赖上下文中最多保留多少条“重点传播链路”
+  # 值越大，更容易覆盖边缘传播路径，但也会增加提示词长度
+  # 一般建议 3~8
+  dependency_context_max_focus_paths: 6
+
+  # 依赖树任务内部相同 payload 最多保留多少份
+  # 设为 1 表示正常去重；设为 -1 表示关闭限制
+  agent2_tree_payload_dedup_limit: -1
+
+  # 节点回退任务内部相同 payload / 上下文签名最多保留多少份
+  # 设为 1 表示正常去重；设为 -1 表示关闭限制
+  agent2_node_payload_dedup_limit: -1
+
+  # 最终合并阶段相同 payload 最多保留多少份
+  # 设为 1 表示正常去重；设为 -1 表示关闭限制
+  agent2_final_payload_dedup_limit: -1
+
+  # Agent_2 失败率保护阈值
+  # 当大模型请求失败率高于该比例时，最终结果会被标记为“审计不完整”，避免把网络故障误判为“审计通过”
+  # 一般建议 0.2 ~ 0.4
+  agent2_failure_rate_threshold: 0.3
+
+  # Agent_2 风险候选预筛选阈值
+  # 值越大，送入 Agent_2 的节点越少，速度更快但可能漏掉边缘风险
+  # 值越小，覆盖更广但噪音更多
+  agent2_candidate_score_threshold: 4
+

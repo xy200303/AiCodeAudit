@@ -170,7 +170,10 @@ def _is_high_value_audit_candidate(graph: nx.DiGraph, node: str) -> tuple[bool, 
     score, context = _candidate_precheck_score(graph, node)
     profile = context["profile"]
     local_summary = context["local_summary"]
-    threshold = max(1, getattr(C.project, "agent2_candidate_score_threshold", 12))
+    raw_threshold = getattr(C.project, "agent2_candidate_score_threshold", 12)
+    if raw_threshold is not None and raw_threshold < 0:
+        return True, score
+    threshold = max(1, raw_threshold)
 
     has_direct_signal = profile["has_input"] or profile["has_sink"] or profile["has_validation"] or profile["has_safety"]
     has_local_risk_chain = (
@@ -246,13 +249,15 @@ async def async_run_agent_1(source_file_list: List[SourceFile], out_file, batch_
 def build_audit_payloads(graph: nx.DiGraph) -> List[str]:
     payload_candidates = []
     tree_payload_candidates = []
-    prescreen_disabled = bool(getattr(C.project, "disable_agent2_candidate_prescreen", False))
-    tree_dedup_disabled = bool(getattr(C.project, "disable_agent2_tree_payload_dedup", False))
-    node_dedup_disabled = bool(getattr(C.project, "disable_agent2_node_payload_dedup", False))
-    final_dedup_disabled = bool(getattr(C.project, "disable_agent2_final_payload_dedup", False))
-    seen_payload_signatures = set()
-    seen_context_signatures = set()
-    seen_tree_signatures = set()
+    prescreen_threshold = getattr(C.project, "agent2_candidate_score_threshold", 12)
+    prescreen_disabled = prescreen_threshold is not None and prescreen_threshold < 0
+    tree_dedup_limit = int(getattr(C.project, "agent2_tree_payload_dedup_limit", 1))
+    node_dedup_limit = int(getattr(C.project, "agent2_node_payload_dedup_limit", 1))
+    final_dedup_limit = int(getattr(C.project, "agent2_final_payload_dedup_limit", 1))
+    tree_signature_counts = {}
+    payload_signature_counts = {}
+    context_signature_counts = {}
+    merged_payload_counts = {}
     skipped_oversize_count = 0
     skipped_prescreen_count = 0
     prescreened_nodes = []
@@ -272,10 +277,10 @@ def build_audit_payloads(graph: nx.DiGraph) -> List[str]:
         if not payload:
             continue
         payload_signature = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-        if not tree_dedup_disabled and payload_signature in seen_tree_signatures:
+        tree_kept_count = tree_signature_counts.get(payload_signature, 0)
+        if tree_dedup_limit >= 0 and tree_kept_count >= max(1, tree_dedup_limit):
             continue
-        if not tree_dedup_disabled:
-            seen_tree_signatures.add(payload_signature)
+        tree_signature_counts[payload_signature] = tree_kept_count + 1
         tree_payload_candidates.append({
             "payload": payload,
             "score": _tree_candidate_score(graph, tree) + prescreen_score,
@@ -300,7 +305,8 @@ def build_audit_payloads(graph: nx.DiGraph) -> List[str]:
             logger.warning("Agent_2 上下文无法收缩到模型限制内，已跳过节点: {}", node)
             continue
         payload_signature = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-        if not node_dedup_disabled and payload_signature in seen_payload_signatures:
+        payload_kept_count = payload_signature_counts.get(payload_signature, 0)
+        if node_dedup_limit >= 0 and payload_kept_count >= max(1, node_dedup_limit):
             continue
 
         center_signature = hashlib.sha256(
@@ -313,12 +319,12 @@ def build_audit_payloads(graph: nx.DiGraph) -> List[str]:
                 ",".join(sorted(local_nodes)),
             ]).encode("utf-8")
         ).hexdigest()
-        if not node_dedup_disabled and center_signature in seen_context_signatures:
+        context_kept_count = context_signature_counts.get(center_signature, 0)
+        if node_dedup_limit >= 0 and context_kept_count >= max(1, node_dedup_limit):
             continue
 
-        if not node_dedup_disabled:
-            seen_payload_signatures.add(payload_signature)
-            seen_context_signatures.add(center_signature)
+        payload_signature_counts[payload_signature] = payload_kept_count + 1
+        context_signature_counts[center_signature] = context_kept_count + 1
         payload_candidates.append({
             "payload": payload,
             "score": (
@@ -355,7 +361,8 @@ def build_audit_payloads(graph: nx.DiGraph) -> List[str]:
             if not payload:
                 continue
             payload_signature = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-            if not node_dedup_disabled and payload_signature in seen_payload_signatures:
+            payload_kept_count = payload_signature_counts.get(payload_signature, 0)
+            if node_dedup_limit >= 0 and payload_kept_count >= max(1, node_dedup_limit):
                 continue
             center_signature = hashlib.sha256(
                 "||".join([
@@ -367,12 +374,12 @@ def build_audit_payloads(graph: nx.DiGraph) -> List[str]:
                     ",".join(sorted(local_nodes)),
                 ]).encode("utf-8")
             ).hexdigest()
-            if not node_dedup_disabled and center_signature in seen_context_signatures:
+            context_kept_count = context_signature_counts.get(center_signature, 0)
+            if node_dedup_limit >= 0 and context_kept_count >= max(1, node_dedup_limit):
                 continue
 
-            if not node_dedup_disabled:
-                seen_payload_signatures.add(payload_signature)
-                seen_context_signatures.add(center_signature)
+            payload_signature_counts[payload_signature] = payload_kept_count + 1
+            context_signature_counts[center_signature] = context_kept_count + 1
             payload_candidates.append({
                 "payload": payload,
                 "score": (
@@ -414,26 +421,25 @@ def build_audit_payloads(graph: nx.DiGraph) -> List[str]:
     merged_candidates.sort(key=lambda item: (-item["score"], -item["tokens"]))
 
     payloads = []
-    seen_merged_payloads = set()
     for item in merged_candidates:
         signature = hashlib.sha256(item["payload"].encode("utf-8")).hexdigest()
-        if not final_dedup_disabled and signature in seen_merged_payloads:
+        merged_kept_count = merged_payload_counts.get(signature, 0)
+        if final_dedup_limit >= 0 and merged_kept_count >= max(1, final_dedup_limit):
             continue
-        if not final_dedup_disabled:
-            seen_merged_payloads.add(signature)
+        merged_payload_counts[signature] = merged_kept_count + 1
         payloads.append(item["payload"])
 
     logger.info(
-        "Agent_2 任务压缩完成，候选节点:{}，候选依赖树数:{}，预筛选跳过节点数:{}，去重后任务数:{}，超限跳过节点数:{}，预筛选关闭:{}，树去重关闭:{}，节点去重关闭:{}，最终去重关闭:{}",
+        "Agent_2 任务压缩完成，候选节点:{}，候选依赖树数:{}，预筛选跳过节点数:{}，去重后任务数:{}，超限跳过节点数:{}，预筛选关闭:{}，树去重上限:{}，节点去重上限:{}，最终去重上限:{}",
         graph.number_of_nodes(),
         len(tree_payload_candidates),
         skipped_prescreen_count,
         len(payloads),
         skipped_oversize_count,
         prescreen_disabled,
-        tree_dedup_disabled,
-        node_dedup_disabled,
-        final_dedup_disabled,
+        tree_dedup_limit,
+        node_dedup_limit,
+        final_dedup_limit,
     )
     return payloads
 

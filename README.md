@@ -282,6 +282,11 @@ cursor.execute("SELECT * FROM users WHERE name = '" + username + "'")
 
 ### 项目扫描配置
 
+特殊值说明：
+
+- `agent2_candidate_score_threshold = -1`：关闭 `Agent_2` 风险候选预筛，尽量保留所有带源码节点进入后续上下文构造
+- `agent2_*_dedup_limit = -1`：关闭对应阶段的去重限制
+
 - `source_file_ext`：需要扫描的源码后缀
 - `config_file_ext`：需要识别的配置文件后缀
 - `exclude_dir`：默认排除目录
@@ -291,12 +296,11 @@ cursor.execute("SELECT * FROM users WHERE name = '" + username + "'")
 - `max_audit_nodes`：单次审计最大上下文节点数
 - `dependency_tree_max_branches`：统一依赖上下文里，每个节点向上/向下最多保留的高价值分支数
 - `dependency_context_max_focus_paths`：统一依赖上下文里最多保留的重点传播链路数
-- `disable_agent2_candidate_prescreen`：是否关闭 `Agent_2` 风险候选预筛；关闭后任务数会明显增加
-- `disable_agent2_tree_payload_dedup`：是否关闭依赖树任务内部去重
-- `disable_agent2_node_payload_dedup`：是否关闭节点回退任务内部去重
-- `disable_agent2_final_payload_dedup`：是否关闭最终合并阶段去重
+- `agent2_tree_payload_dedup_limit`：依赖树任务内部相同 payload 最多保留多少份；`1` 表示正常去重，`-1` 表示关闭限制
+- `agent2_node_payload_dedup_limit`：节点回退任务内部相同 payload / 上下文签名最多保留多少份；`1` 表示正常去重，`-1` 表示关闭限制
+- `agent2_final_payload_dedup_limit`：最终合并阶段相同 payload 最多保留多少份；`1` 表示正常去重，`-1` 表示关闭限制
 - `agent2_failure_rate_threshold`：`Agent_2` 失败率保护阈值；超过该比例时，结果会被标记为“审计不完整”
-- `agent2_candidate_score_threshold`：`Agent_2` 风险候选预筛阈值；值越大，送入大模型的节点越少，速度更快但可能漏掉边缘风险
+- `agent2_candidate_score_threshold`：`Agent_2` 风险候选预筛阈值；值越大，送入大模型的节点越少，速度更快但可能漏掉边缘风险；设为 `-1` 表示关闭预筛
 
 `dependency_parse_engine` 说明：
 

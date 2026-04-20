@@ -37,10 +37,9 @@ def create_default_config(file_path):
             "max_audit_nodes": 12,
             "dependency_tree_max_branches": 3,
             "dependency_context_max_focus_paths": 6,
-            "disable_agent2_candidate_prescreen": False,
-            "disable_agent2_tree_payload_dedup": False,
-            "disable_agent2_node_payload_dedup": False,
-            "disable_agent2_final_payload_dedup": False,
+            "agent2_tree_payload_dedup_limit": 1,
+            "agent2_node_payload_dedup_limit": 1,
+            "agent2_final_payload_dedup_limit": 1,
             "agent2_failure_rate_threshold": 0.3,
             "agent2_candidate_score_threshold": 8,
         }
