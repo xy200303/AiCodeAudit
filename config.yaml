@@ -57,12 +57,44 @@ project:
   - doc
   - .secrets
   - .env
+  # 针对整站模板 / 老 PHP 项目常见的第三方前端插件噪音目录做额外裁剪
+  # 这些目录通常会显著放大依赖图，但对业务调用关系帮助有限
+  - examples
+  - example
+  - demos
+  - demo
+  - samples
+  - sample
+  - more_examples
+  - unit_testing
+  - brandsimage
+  - layouts
+  - ckeditor
+  - DataTables
+  - jQRangeSlider
+  - jquery-mockjax
+  - dynatree
+  - jqGrid
+  - jquery-validation
+  - jquery-ui
+  - jquery.maskedinput
+  - fullcalendar
+  - bootstrap-datetimepicker
+  - bootstrap-paginator
+  - wysihtml5
+  - x-editable
+  - Jcrop
+  - iCheck
+  - moment
+  - select2
+  - colorbox
+  - gmaps
+  - jQuery-File-Upload
   exclude_max_file_size: 1
-  dependency_parse_engine: ast
+  dependency_parse_engine: auto
   source_file_ext:
   - .py
   - .go
-  - .js
   - .java
   - .cpp
   - .php

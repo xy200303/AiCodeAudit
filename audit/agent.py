@@ -233,12 +233,12 @@ async def agent_1(source_file: SourceFile):
                 logger.debug("Agent_1 使用静态解析提取成功: {} -> {} 条依赖", source_file.path, len(parsed))
                 return parsed
             if parse_engine == "auto":
-                logger.warning("静态解析失败，auto 模式回退到 LLM 语义块提取: {}", source_file.path)
+                logger.debug("静态解析未提取到有效依赖，auto 模式回退到 LLM 语义块提取: {}", source_file.path)
             else:
-                logger.warning("静态解析失败，当前配置禁止回退到 LLM，返回空结果: {}", source_file.path)
+                logger.debug("静态解析未提取到有效依赖，当前配置禁止回退到 LLM，返回空结果: {}", source_file.path)
                 return None
         elif parse_engine == "ast":
-            logger.warning("当前文件类型暂不支持静态解析，且配置为 ast-only，返回空结果: {}", source_file.path)
+            logger.debug("当前文件类型暂不支持静态解析，且配置为 ast-only，返回空结果: {}", source_file.path)
             return None
         elif parse_engine == "auto":
             logger.debug("当前文件类型未接入静态解析，auto 模式回退到 LLM: {}", source_file.path)

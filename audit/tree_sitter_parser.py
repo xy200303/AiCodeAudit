@@ -49,6 +49,9 @@ FUNCTION_NODE_TYPES = {
 CALL_NODE_TYPES = {
     "call",
     "call_expression",
+    "function_call_expression",
+    "member_call_expression",
+    "scoped_call_expression",
     "invocation_expression",
     "method_invocation",
     "new_expression",
@@ -60,6 +63,10 @@ IMPORT_NODE_TYPES = {
     "import_from_statement",
     "import_declaration",
     "import_spec",
+    "include_expression",
+    "include_once_expression",
+    "require_expression",
+    "require_once_expression",
     "require_call",
     "package_clause",
     "package_declaration",
@@ -268,6 +275,28 @@ def _extract_expression_name(node: Node | None, source_bytes: bytes) -> str:
 
 
 def _extract_callable_name(node: Node, source_bytes: bytes) -> str:
+    if node.type == "member_call_expression":
+        object_name = ""
+        method_name = ""
+        if node.named_children:
+            object_name = _extract_expression_name(node.named_children[0], source_bytes)
+        if len(node.named_children) > 1:
+            method_name = _extract_expression_name(node.named_children[1], source_bytes)
+        combined = f"{object_name}.{method_name}".strip(".")
+        if combined:
+            return combined
+
+    if node.type == "scoped_call_expression":
+        scope_name = ""
+        method_name = ""
+        if node.named_children:
+            scope_name = _extract_expression_name(node.named_children[0], source_bytes)
+        if len(node.named_children) > 1:
+            method_name = _extract_expression_name(node.named_children[1], source_bytes)
+        combined = f"{scope_name}.{method_name}".strip(".")
+        if combined:
+            return combined
+
     for field_name in ("function", "name", "constructor", "object", "type"):
         candidate = node.child_by_field_name(field_name)
         if candidate is not None:
@@ -446,6 +475,7 @@ def _build_code_units_from_visitor(source_file: SourceFile, visitor: GenericTree
                 target_name=target_name,
                 source_desc=_build_desc(target_name),
             ))
+
     return code_units or None
 
 
